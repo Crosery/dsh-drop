@@ -1,0 +1,43 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to publish
+        required: true
+        type: string
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Verify tag and all release gates
+        run: |
+          node -e 'const p = require("./package.json"); if (process.env.RELEASE_TAG !== "v" + p.version) process.exit(1)'
+          npm run typecheck
+          npm test
+          npm run build
+          npm run check
+          npm run check:dist
+      - name: Pack stable asset and checksum
+        run: |
+          ASSET=$(npm pack --ignore-scripts --silent)
+          mv "$ASSET" dsh-drop.tgz
+          sha256sum dsh-drop.tgz > SHA256SUMS
+      - name: Publish verified release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$RELEASE_TAG" dsh-drop.tgz SHA256SUMS --verify-tag --generate-notes --title "DSH Drop $RELEASE_TAG"

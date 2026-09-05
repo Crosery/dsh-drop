@@ -1,0 +1,13 @@
+{
+  "//": "Typecheck-only config that also covers tests. The build config keeps rootDir at src (its declaration output depends on it), so test fixtures drifting out of sync with a contract change would otherwise go unnoticed until the suite runs. Only the DOM-free modules are testable this way, which is why every drag decision this plugin makes lives in `src/contract.ts` rather than in the client entry.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "declaration": false,
+    "emitDeclarationOnly": false,
+    "rootDir": "."
+  },
+  "include": ["src/**/*.ts", "tests/**/*.ts"],
+  "exclude": ["src/client/**"]
+}

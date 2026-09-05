@@ -1,0 +1,27 @@
+{
+  "//paths": "The shipped `declare module '@deepseek-ai/dsh-client-ui-slots'` augmentations — the SlotMap seats and the standard-prop kits — merge only when every package writing one resolves the target to the SAME file this program does. The local dsh install ships no ui-slots or ui-primitives directory, so resolution from inside ui-conversation's own .d.ts fails and its SlotMap entries are dropped silently, leaving `conversation.input.dock` unknown. The mapping below pins both to the copy this package installed.",
+  "//": "Browser half. `src/contract.ts` is compiled by both configs — it is the shared module and carries no Context augmentation of its own, so the duplicate declaration emit is identical either way.",
+  "compilerOptions": {
+    "target": "ES2024",
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "exactOptionalPropertyTypes": false,
+    "noUncheckedIndexedAccess": true,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "outDir": "lib/types",
+    "rootDir": "src",
+    "skipLibCheck": true,
+    "types": [],
+    "paths": {
+      "@deepseek-ai/dsh-client-ui-slots": ["./node_modules/@deepseek-ai/dsh-client-ui-slots/lib/types/index.d.ts"],
+      "@deepseek-ai/dsh-client-ui-primitives": ["./node_modules/@deepseek-ai/dsh-client-ui-primitives/lib/types/index.d.ts"]
+    }
+  },
+  "include": ["src/client/**/*.ts", "src/client/**/*.tsx", "src/contract.ts", "src/preview.ts"]
+}
