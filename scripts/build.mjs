@@ -87,4 +87,5 @@ await build({
   footer: { js: 'return module.exports; } });' },
 })
 
-console.log(`built ${id}: lib/index.js + lib/client.js`)
+// Keep stdout machine-readable for npm pack --json on older npm releases.
+console.error(`built ${id}: lib/index.js + lib/client.js`)
