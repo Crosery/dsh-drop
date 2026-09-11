@@ -12,7 +12,7 @@ Drag or paste files into **DeepSeek Harness Web**. Images and files share one pr
 
 ## Install
 
-Requires DSH Web from the **0.1.1** train or later (verified against 0.1.1-rc.2, 0.1.2-rc.1, 0.1.5-rc.1, 0.1.5-rc.2 and 0.1.5-alpha.2), pnpm on PATH and an even Node major supported by DSH (CI: 22.19 / 24). Install the prebuilt release, then **restart the profile**:
+Requires DSH Web from the **0.1.1** train or later (verified against 0.1.1-rc.2, 0.1.2-rc.1, 0.1.2-alpha.5, 0.1.3-alpha.2, 0.1.5-rc.1, 0.1.5-rc.2, 0.1.5-alpha.1 and 0.1.5-alpha.2), pnpm on PATH and an even Node major supported by DSH (CI: 22.19 / 24). Install the prebuilt release, then **restart the profile**:
 
 ~~~sh
 dsh plugin --profile web add https://github.com/Crosery/dsh-drop/releases/latest/download/dsh-drop.tgz

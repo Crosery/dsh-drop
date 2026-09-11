@@ -12,7 +12,7 @@
 
 ## 安装
 
-要求 DSH Web **0.1.1** 及以上包序列（已在 0.1.1-rc.2、0.1.2-rc.1、0.1.5-rc.1、0.1.5-rc.2、0.1.5-alpha.2 上验证）、PATH 上有 pnpm，以及 DSH 支持的偶数 Node 主版本（CI：22.19 / 24）。安装预构建包，然后**重启 profile**：
+要求 DSH Web **0.1.1** 及以上包序列（已在 0.1.1-rc.2、0.1.2-rc.1、0.1.2-alpha.5、0.1.3-alpha.2、0.1.5-rc.1、0.1.5-rc.2、0.1.5-alpha.1、0.1.5-alpha.2 上验证）、PATH 上有 pnpm，以及 DSH 支持的偶数 Node 主版本（CI：22.19 / 24）。安装预构建包，然后**重启 profile**：
 
 ~~~sh
 dsh plugin --profile web add https://github.com/Crosery/dsh-drop/releases/latest/download/dsh-drop.tgz

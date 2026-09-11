@@ -2,6 +2,10 @@
 
 > [English](CHANGELOG.md) · **中文**
 
+## 0.1.2
+
+- peer 范围补上 alpha 分支。此前每个元组只有 `-rc` 比较器，而 `alpha` 在 semver 里排序低于 `rc`，因此 `>=0.1.5-rc.0` 不匹配 `0.1.5-alpha.2`——全部 alpha 版 harness 都被拒绝，市场收录规范对此有明文警告。现已对 8 个已验证序列（含 0.1.2-alpha.5、0.1.3-alpha.2、0.1.5-alpha.1/2）逐一验证并写入范围。
+
 ## 0.1.1
 
 - 兼容 0.1.1 到 0.1.5 的全部 DSH 序列，覆盖当前 `latest`、`next`、`alpha` 三个 tag；对 0.1.1-rc.2、0.1.2-rc.1、0.1.5-rc.1、0.1.5-rc.2、0.1.5-alpha.2 逐一做了类型检查与测试验证。
@@ -11,6 +15,7 @@
 - 双半边产物入库并移除 `prepare` 脚本：git 安装不再需要 `allowBuilds` 授权，也就是插件市场此前 `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED` 失败的根因。`npm run check:dist` 守住已提交产物与源码一致。
 - 新增 `@deepseek-ai/dsh-client-store` dev pin：0.1.2 起 `dsh-client-ui-slots` 从该包再导出选择器 hook 类型，缺它会让每个 hook 静默丢失参数类型。
 - peer 范围只扩到已验证序列；兼容性 job 的漂移 issue 会写明某序列缺了哪些包。
+- 显式接纳 alpha 线：每个已验证元组同时带 alpha 与 `-rc` 分支。只有 `-rc` 比较器的范围会直接排除同元组的 alpha，此前的范围因此拒绝了全部 alpha 版 harness。
 
 ## 0.1.0
 

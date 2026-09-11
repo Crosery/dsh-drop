@@ -2,17 +2,20 @@
 
 > [English](harness-compatibility.md) · **中文** · [目录](README.zh.md)
 
-可复现基线为公开发布的 DSH 0.1.1-rc.2 包序列及 Cordis 4.0.2；从该基线到 0.1.5 的每个包序列均已端到端验证。Host peer 显式接纳这些预发布元组。node-semver 的通配符或看似宽泛的稳定范围不会自动接纳预发布；不变量脚本逐项核对 dev pin 与 peer。运行时服务包放 peer，dev 镜像已验证的具体版本。发布 checkout 不得依赖本地 link:、file:、workspace:。
+可复现基线为公开发布的 DSH 0.1.1-rc.2 包序列及 Cordis 4.0.2；从该基线到 0.1.5 的每个包序列均已端到端验证。Host peer 显式接纳这些预发布元组（含 alpha 线）。这里有两个独立的坑，peer 范围必须同时躲开：node-semver 的通配符或看似宽泛的稳定范围根本不接纳预发布；而只有 `-rc` 比较器的范围会直接排除同元组的 alpha——`>=0.1.5-rc.0` 不匹配 `0.1.5-alpha.2`，因为 `alpha` 排序在 `rc` 之前。因此每个已验证元组同时带 alpha 与 rc 两个分支；不变量脚本逐项核对 dev pin 与 peer，市场收录规范也点名了这一条。运行时服务包放 peer，dev 镜像已验证的具体版本。发布 checkout 不得依赖本地 link:、file:、workspace:。
 
 ## 已验证序列
 
 | 序列 | 结果 |
 | --- | --- |
-| 0.1.1-rc.2 | 类型检查、构建、103 项测试 |
-| 0.1.2-rc.1 | 类型检查、构建、103 项测试 |
-| 0.1.5-rc.1 | 类型检查、构建、103 项测试 |
-| 0.1.5-rc.2 | 类型检查、构建、103 项测试 |
-| 0.1.5-alpha.2 | 类型检查、构建、103 项测试 |
+| 0.1.1-rc.2 | 类型检查、构建、110 项测试 |
+| 0.1.2-rc.1 | 类型检查、构建、110 项测试 |
+| 0.1.5-rc.1 | 类型检查、构建、110 项测试 |
+| 0.1.5-rc.2 | 类型检查、构建、110 项测试 |
+| 0.1.5-alpha.2 | 类型检查、构建、110 项测试 |
+| 0.1.2-alpha.5 | 类型检查、110 项测试 |
+| 0.1.3-alpha.2 | 类型检查、110 项测试 |
+| 0.1.5-alpha.1 | 类型检查、110 项测试 |
 
 每行都是在临时副本里把全部 `@deepseek-ai/dsh-*` devDependency 指向该序列的精确发布版本，再依次执行 `npm install --ignore-scripts`、`npm run typecheck` 与 `npm test`。每周 harness-compat 探测 next/alpha，失败创建或更新 upstream-drift issue，不自动发布或扩大 peer。缺 tag 必须报告，不能算兼容；安装失败与 API/type 失败要分开诊断。
 
