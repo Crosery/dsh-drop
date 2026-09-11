@@ -22,7 +22,10 @@
 
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 // Type-only: the SlotMap seat, the standard-prop kits, and the locale service.
-import type {} from '@deepseek-ai/dsh-client-runtime/client'
+// `dsh-client-ui-renderer` owns the slot registry declaration from 0.1.2;
+// `dsh-client-runtime` published it up to 0.1.1 and stopped shipping, so
+// importing either one by name would pin this build to a single train.
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { AttachedFile, AttachedFiles } from './attached.ts'
@@ -139,8 +142,14 @@ export function installPreviewRail(
       // there would freeze at whatever was staged in that instant. A
       // `HostObservable` is bound into a `useAttached` selector hook instead,
       // and the rail re-renders on every drop and removal.
+      //
+      // `sessionId` arrives as the factory's parameter — the framework-resolved
+      // current session, `undefined` while none is selected. It used to arrive
+      // as a standard prop; 0.1.2 stopped merging it there, so the rail takes it
+      // from this share and works on either train.
       inject: (sessionId) => ({
         ...shared,
+        sessionId,
         hooks: {
           attached: {
             getSnapshot: () => (sessionId === undefined ? EMPTY : attached.list(sessionId)),

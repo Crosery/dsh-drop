@@ -2,6 +2,16 @@
 
 > [English](CHANGELOG.md) · **中文**
 
+## 0.1.1
+
+- 兼容 0.1.1 到 0.1.5 的全部 DSH 序列，覆盖当前 `latest`、`next`、`alpha` 三个 tag；对 0.1.1-rc.2、0.1.2-rc.1、0.1.5-rc.1、0.1.5-rc.2、0.1.5-alpha.2 逐一做了类型检查与测试验证。
+- 按运行中的 harness 实际提供的 API 挂载设置。0.1.2 删除了 `installSettingsSection` 与 `settingsNamespace`，改为 `ctx.settings.installSection`；静态 import 那对旧导出会让整个 Host 入口加载失败，这就是 0.1.2 用户看到的"插件坏掉"。
+- 客户端按名读取 `sessions` 服务、结构化声明实际调用的切片，并重述附件席位改名后的 owner 动词（`onAddFiles`、`onRemoveAttachment`）与变宽的草稿附件形状。`@deepseek-ai/dsh-client-runtime` 在 0.1.1 之后停止发布，点名它等于把插件钉死在单一序列。
+- `sessionId` 改从注册的 `inject` 工厂取（0.1.2 把它挪到了那里），不再依赖标准 prop。
+- 双半边产物入库并移除 `prepare` 脚本：git 安装不再需要 `allowBuilds` 授权，也就是插件市场此前 `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED` 失败的根因。`npm run check:dist` 守住已提交产物与源码一致。
+- 新增 `@deepseek-ai/dsh-client-store` dev pin：0.1.2 起 `dsh-client-ui-slots` 从该包再导出选择器 hook 类型，缺它会让每个 hook 静默丢失参数类型。
+- peer 范围只扩到已验证序列；兼容性 job 的漂移 issue 会写明某序列缺了哪些包。
+
 ## 0.1.0
 
 - 将现有 DSH Drop 提取为自足 MIT 仓库，使用公开依赖 pin。

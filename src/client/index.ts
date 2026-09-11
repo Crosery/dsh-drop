@@ -25,7 +25,13 @@ import type { Context as ClientContext } from '@deepseek-ai/cordis'
 // Type-only throughout. These pull the Context merges that give `ctx` its
 // services; a value import would fail the client bundle-purity contract and, at
 // runtime, need a specifier the loader's module table cannot answer.
-import type {} from '@deepseek-ai/dsh-client-runtime/client'
+//
+// `dsh-client-runtime` is deliberately NOT imported: it stopped publishing
+// after 0.1.1, and from 0.1.2 the slot registry is declared by
+// `dsh-client-ui-renderer` while the session services moved to
+// `dsh-api-session-controller`. The two services this entry reads are declared
+// structurally below instead, so one build serves either train.
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type { IConversation } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import {
   claimsFileTypes, mentionFor, planDrop, uriListPaths, type DroppedEntry,
@@ -81,6 +87,22 @@ export const name = '@crosery/dsh-drop'
  * public path to it, and its return type is the same interface.
  */
 type SessionInput = ReturnType<IConversation['input']['for']>
+
+/**
+ * The client session-service slice this plugin reads, declared structurally.
+ *
+ * `sessions` is declared by `@deepseek-ai/dsh-client-runtime` up to harness
+ * 0.1.1 and by `@deepseek-ai/dsh-api-session-controller` from 0.1.2, and the
+ * former stopped publishing. Importing either one pins this build to a single
+ * train and fails the other's typecheck, so the two members this plugin calls
+ * are declared here and the service is read by name — one build, either train.
+ */
+interface DropSessions {
+  /** Session list state; `current` is the selected session, or absent. */
+  readonly list: { getSnapshot(): { current: string | undefined } }
+  /** The Agent scope for one session, or undefined while it is unknown. */
+  scope(id: string): unknown
+}
 
 /**
  * Whether this plugin claims a transfer.
@@ -230,6 +252,11 @@ export function apply(ctx: ClientContext): void {
 
   ctx.inject(['sessions', 'conversation'], (scoped) => {
     scoped.effect(() => {
+      // Read by name rather than through the ambient merge: every harness train
+      // declares `ctx.sessions`, but each declares it from a different package,
+      // so the value is narrowed once to the slice this plugin calls.
+      const sessions = scoped.get('sessions') as unknown as DropSessions | undefined
+      if (sessions === undefined) return () => {}
       const overlay = createOverlay()
       const disposeReferenceFit = installReferenceFit()
       const aborter = new AbortController()
@@ -238,18 +265,21 @@ export function apply(ctx: ClientContext): void {
       /**
        * The current session's id, or undefined outside a session.
        *
-       * Branded, because `sessions.scope` demands it; the staging store keys on
-       * the plain string, which every brand erases to.
+       * A plain string: the staging store keys on it, and so does the
+       * structural session face above. Every brand the harness puts on a
+       * session id erases to this string.
        */
-      const currentSession = () => scoped.sessions.list.getSnapshot().current
+      const currentSession = () => sessions.list.getSnapshot().current
 
       /** Resolve the current session's input facade, for notices. */
       const currentInput = (): SessionInput | undefined => {
         const id = currentSession()
         if (id === undefined) return undefined
-        const agent = scoped.sessions.scope(id)
+        const agent = sessions.scope(id)
         if (agent === undefined) return undefined
-        return scoped.conversation.input.for(agent)
+        // The scope handle is opaque through the structural face; the
+        // conversation service is the authority on what it accepts.
+        return scoped.conversation.input.for(agent as never)
       }
 
       /**

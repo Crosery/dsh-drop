@@ -7,7 +7,7 @@
 3. 推送匹配版本的 v 前缀 tag。Release 工作流核对 tag/版本、验证、构建、打包后才发布。
 4. 验证公开资产可下载，包含 cordis.patch.yml 和双半边，并能免源码构建安装。
 
-固定资产名 dsh-drop.tgz：https://github.com/Crosery/dsh-drop/releases/latest/download/dsh-drop.tgz。latest 动态解析但文件名按字面取，所以文件名不带版本。需要固定版本时使用 releases/download/v0.1.0/dsh-drop.tgz。每次发布附 SHA256SUMS。当前未配置 npm 发布，不要宣传 npm 包名安装渠道。Git 源码安装要信任 prepare，并在 profile 显式允许 allowBuilds。
+固定资产名 dsh-drop.tgz：https://github.com/Crosery/dsh-drop/releases/latest/download/dsh-drop.tgz。latest 动态解析但文件名按字面取，所以文件名不带版本。需要固定版本时使用 releases/download/v0.1.1/dsh-drop.tgz。每次发布附 SHA256SUMS。当前未配置 npm 发布，不要宣传 npm 包名安装渠道。仓库提交了双半边产物且没有 prepare 脚本，git 源码安装无需 allowBuilds 授权；可复现安装仍以 tarball 为准。
 
 ## 市场
 
