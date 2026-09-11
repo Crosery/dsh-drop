@@ -2,17 +2,20 @@
 
 > **English** · [中文](harness-compatibility.zh.md) · [Index](README.md)
 
-The reproducible baseline is the published 0.1.1-rc.2 DSH package train with Cordis 4.0.2, and this plugin is verified end to end against every train from there through 0.1.5. Host peers admit each of those prerelease tuples explicitly. A wildcard or an apparently broad stable range excludes prereleases under node-semver; the invariant checker verifies each pinned dev version against its peer range. Keep official runtime service packages as peers and mirror their exact tested versions in devDependencies. No local link:, file: or workspace: dependencies belong in a release checkout.
+The reproducible baseline is the published 0.1.1-rc.2 DSH package train with Cordis 4.0.2, and this plugin is verified end to end against every train from there through 0.1.5. Host peers admit each of those prerelease tuples explicitly, alpha lines included. Two separate traps live here, and the peer range has to defeat both. A wildcard or an apparently broad stable range excludes every prerelease under node-semver. And a range whose only prerelease comparators sit on the `-rc` side of a tuple excludes that tuple's alphas outright — `>=0.1.5-rc.0` does not match `0.1.5-alpha.2`, because `alpha` sorts below `rc`. Each verified tuple therefore carries both an alpha and an rc branch; the invariant checker verifies each pinned dev version against the range, and the marketplace guidelines call this out by name. Keep official runtime service packages as peers and mirror their exact tested versions in devDependencies. No local link:, file: or workspace: dependencies belong in a release checkout.
 
 ## Verified trains
 
 | Train | Result |
 | --- | --- |
-| 0.1.1-rc.2 | typecheck, build, 103 tests |
-| 0.1.2-rc.1 | typecheck, build, 103 tests |
-| 0.1.5-rc.1 | typecheck, build, 103 tests |
-| 0.1.5-rc.2 | typecheck, build, 103 tests |
-| 0.1.5-alpha.2 | typecheck, build, 103 tests |
+| 0.1.1-rc.2 | typecheck, build, 110 tests |
+| 0.1.2-rc.1 | typecheck, build, 110 tests |
+| 0.1.5-rc.1 | typecheck, build, 110 tests |
+| 0.1.5-rc.2 | typecheck, build, 110 tests |
+| 0.1.5-alpha.2 | typecheck, build, 110 tests |
+| 0.1.2-alpha.5 | typecheck, 110 tests |
+| 0.1.3-alpha.2 | typecheck, 110 tests |
+| 0.1.5-alpha.1 | typecheck, 110 tests |
 
 Each row is a scratch copy with every `@deepseek-ai/dsh-*` devDependency repointed at that exact published version, then `npm install --ignore-scripts`, `npm run typecheck` and `npm test`. The scheduled harness-compat workflow probes next and alpha tags and opens or updates an upstream-drift issue on failure. It does not publish or widen peer ranges automatically. Missing tags are reported rather than treated as compatible.
 
