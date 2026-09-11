@@ -6,11 +6,11 @@
 
 Host 注册 POST /crosery/dsh-drop/resolve（只 stat 比对路径）和 POST /crosery/dsh-drop/stage（限额流式上传）。浏览器持有按会话隔离的 AttachedFiles 和页面内 PreviewStore。附件栏以 priority -1 占用 single 席位 conversation.input.attachments，卸载后恢复出厂条目；占席位也必须接管纯图片接收。
 
-拖放规划、文件名归约、引用拼写和预览分类放在无 DOM 的纯函数。客户端仅用公开 slot props 和 inputActions。捕获阶段的提交拦截是兼容接缝，不是另一套发送实现。修改时验证 Enter、IME、Shift+Enter、禁用/只读控件、引用菜单、失败和纯文件发送。
+拖放规划、文件名归约、引用拼写和预览分类放在无 DOM 的纯函数。客户端结构化读取席位 props（见 DropRail：owner 动词与附件形状都是重述的，因为 0.1.2 两者都改了名），按名读取 `sessions`；写入草稿只经 `inputActions`。捕获阶段的提交拦截是兼容接缝，不是另一套发送实现。修改时验证 Enter、IME、Shift+Enter、禁用/只读控件、引用菜单、失败和纯文件发送。
 
 ## 状态与生命周期
 
-引用在发送前不进草稿，用户文字放在路径前面，保持标题可读。PNG/JPEG/WebP/GIF 通过 onAddImages 沿用宿主校验。未发送的非图片引用及预览字节只存在页面内，刷新或卸载会丢失。提交失败由组合器保留拼好路径的草稿，同时清空待发清单，重试不会重复拼接。
+引用在发送前不进草稿，用户文字放在路径前面，保持标题可读。PNG/JPEG/WebP/GIF 通过席位自带的文件接收口（`onAddFiles`，0.1.1 上是 `onAddImages`）沿用宿主校验。未发送的非图片引用及预览字节只存在页面内，刷新或卸载会丢失。提交失败由组合器保留拼好路径的草稿，同时清空待发清单，重试不会重复拼接。
 
 状态放在 apply/effect 内；卸载取消上传、移除 document 监听。object URL 在卸载时撤销，长会话可能占用较多内存。文本只预览前 64 KiB；Office 和压缩包只提供身份卡。
 
@@ -23,5 +23,7 @@ Host 注册 POST /crosery/dsh-drop/resolve（只 stat 比对路径）和 POST /c
 ## 验证
 
 运行 npm run typecheck、npm test、npm run build、npm run check、npm run check:dist。Host 测试使用真实 HTTP 和临时目录。两半边分开 typecheck；测试可以包含 DOM 类型，但不能同时拉入相冲突的 Context 增强。新增行为补能在旧实现上失败的回归。UI 修改要在已有 DSH URL 刷新后用合成文件验证：纯图片、混合拖放、粘贴、移除、文本/PDF 预览、灯箱键盘焦点、窄栏、纯文件 Enter。截图不能暴露真实文档和会话历史。仅记录实际跑过的验证。
+
+任何客户端改动都必须对全部已验证序列通过类型检查，而不只是基线：复制一份树，把 `@deepseek-ai/dsh-*` devDependency 指向某个已发布版本，再安装并 typecheck（见 docs/harness-compatibility.zh.md）。`lib/` 已入库，因此源码改动要跟着跑 npm run build 并提交重新生成的产物，否则 check:dist 会红。
 
 来源：src/index.ts、src/contract.ts、两条 route、src/client/rail-entry.ts 及 pin 版本的 dsh-client-ui-conversation 公开声明。

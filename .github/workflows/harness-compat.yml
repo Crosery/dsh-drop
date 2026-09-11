@@ -54,11 +54,18 @@ jobs:
             pkg.devDependencies[name] = version
             moved.push(`${name}@${version}`)
           }
-          if (missing.length > 0) throw new Error('Incomplete train: ' + missing.join(', '))
           fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n')
           console.log('repointed:', moved.length, 'packages')
-          if (missing.length > 0) console.log('no build on this tag:', missing.join(', '))
+          // An incomplete train is reported, not fused with a type failure: the
+          // issue body has to say which of the two happened, or the reader
+          // cannot tell "upstream has not published this package yet" from
+          // "upstream renamed an export we call".
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `missing=${missing.join(', ')}\n`)
           fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `### harness@${tag}\n\n- repointed ${moved.length}\n- absent on tag: ${missing.join(', ') || 'none'}\n`)
+          if (missing.length > 0) {
+            console.log('::error::train incomplete on @' + tag + ': ' + missing.join(', '))
+            process.exit(1)
+          }
           JS
 
       # The train can be published incomplete, so peer resolution is not the
@@ -85,7 +92,11 @@ jobs:
               state: 'open', labels: 'upstream-drift',
             })
             const hit = existing.data.find(i => i.title === title)
-            const body = `The scheduled compatibility job failed against the \`${tag}\` harness train.\n\nRun: ${url}\n\nThis usually means an upstream export was renamed or removed. Check the failing typecheck output before widening the peer range in \`package.json\`.`
+            const missing = '${{ steps.repoint.outputs.missing }}'
+            const body = `The scheduled compatibility job failed against the \`${tag}\` harness train.\n\nRun: ${url}\n\n` +
+              (missing
+                ? `**This train is published incomplete**: \`${missing}\` has no \`${tag}\` tag on npm, so nothing was installed and the type surface was never exercised. Do not widen the peer range for this. Re-run once upstream publishes, or drop the package if this plugin no longer needs it.\n`
+                : 'This usually means an upstream export was renamed or removed. Check the failing typecheck output before widening the peer range in `package.json`. Update the structural adapters and the peer ranges only for the trains actually verified (see docs/harness-compatibility.md).\n')
             await github.rest.issues.getLabel({ owner: context.repo.owner, repo: context.repo.repo, name: 'upstream-drift' }).catch(() => github.rest.issues.createLabel({ owner: context.repo.owner, repo: context.repo.repo, name: 'upstream-drift', color: 'd93f0b' }))
             if (hit) {
               await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: hit.number, body })

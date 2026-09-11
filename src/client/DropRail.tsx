@@ -28,9 +28,16 @@ import type { ReactNode } from 'react'
 import {
   IconChevronLeftOutline14, IconChevronRightOutline14, IconCloseOutline16, IconPlayOutline16,
 } from '@deepseek-ai/dsh-client-ui-primitives'
-// Type-only: these pull the SlotMap declaration for the attachment seat and
-// the standard-kit merges. A value import would fail the bundle-purity gate.
-import type {} from '@deepseek-ai/dsh-client-runtime/client'
+// Type-only: these pull the SlotMap declaration for the attachment seat, the
+// standard-kit merges, and the locale seat. A value import would fail the
+// bundle-purity gate.
+//
+// `@deepseek-ai/dsh-client-runtime` is deliberately NOT imported: it stopped
+// publishing after 0.1.1, and from 0.1.2 the slot registry is declared by
+// `dsh-client-ui-renderer` and the session services by
+// `dsh-api-session-controller`. Importing either train's owner pins this build
+// to that train, so the props this component reads are restated below instead.
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { fileNameOf } from '../contract.ts'
@@ -58,6 +65,14 @@ const THUMBNAIL_KINDS: readonly DropKind[] = ['image', 'video']
 
 /** Business face this plugin injects into the rail. */
 export interface DropRailInjected {
+  /**
+   * The framework-resolved session this occurrence belongs to.
+   *
+   * Bound by the registration's `inject` factory rather than read off the
+   * standard kit: 0.1.2 stopped merging `sessionId` into the props of
+   * session-maybe slots and hands it to the factory instead.
+   */
+  sessionId: string | undefined
   /** Preview material for one path; absent when this page never held the bytes. */
   assetOf: (path: string) => DropAsset | undefined
   /** Decode one text file's head, cached per path. */
@@ -108,21 +123,72 @@ export interface ComposerBinding {
 }
 
 /**
- * Full rail props: the attachment seat's owner share, the injected face with
- * its `hooks` compartment bound into selector hooks, and the locale seat.
+ * One draft attachment, as the seat hands it over.
+ *
+ * Restated structurally rather than imported from the conversation package:
+ * 0.1.2 widened this union with a file member that carries no `previewUrl`, and
+ * naming one train's type would pin the component to that train.
+ */
+export interface SeatAttachment {
+  /** Draft identity, for the owner's remove verb. */
+  id: string
+  /** The browser `File` behind the draft. */
+  file: { name: string; size: number }
+  /** Object URL for drafts that have pixels; absent for generic files. */
+  previewUrl?: string | undefined
+}
+
+/**
+ * The seat's owner share plus the two session-kit members this rail reads.
+ *
+ * Restated rather than imported, because the seat's prop names moved in 0.1.2:
+ * `onAddImages` → `onAddFiles` and `onRemoveImage` → `onRemoveAttachment`, and
+ * draft attachments grew a file member with no `previewUrl`. Both name pairs are
+ * optional here and the rail calls whichever pair the running harness supplies —
+ * one registration, either train.
+ */
+export interface SeatProps {
+  /** Browser-owned draft attachments in input order. */
+  attachments: readonly SeatAttachment[]
+  /** Add one dropped batch through the composer's validation path (≤0.1.1 name). */
+  onAddImages?: ((files: readonly File[]) => void) | undefined
+  /** Add one dropped batch through the composer's validation path (≥0.1.2 name). */
+  onAddFiles?: ((files: readonly File[]) => void) | undefined
+  /**
+   * Remove one draft attachment through the service (≤0.1.1 name).
+   *
+   * Method shorthand is load-bearing: the id is branded by the conversation
+   * package (`DraftAttachmentId`), and the brand's symbol is not importable
+   * without naming one train — a method signature is checked bivariantly, so
+   * the owner's branded parameter still satisfies this plain-string one.
+   */
+  onRemoveImage?(id: string): void
+  /** Remove one draft attachment through the service (≥0.1.2 name). */
+  onRemoveAttachment?(id: string): void
+}
+
+/**
+ * Full rail props: the seat's share, this plugin's injected face, and the
+ * locale seat.
+ *
+ * The seat's runtime share keeps everything this rail does not restate — the
+ * session kit (`useInput`, `inputActions`) and the `useAttached` hook the
+ * framework synthesizes from the injected `hooks` compartment.
  */
 export type DropRailProps =
-  PropsRuntime<'conversation.input.attachments'>
+  Omit<PropsRuntime<'conversation.input.attachments'>, keyof SeatProps>
+  & SeatProps
   & InjectFace<DropRailInjected>
   & PropsLocale<typeof DROP_NS>
 
-/** One item in the rail: a draft image, or a referenced file. */
+/** One item in the rail: a draft attachment, or a referenced file. */
 type RailItem =
   | {
     row: 'image'
     key: string
     name: string
-    url: string
+    /** Preview URL; absent for a draft the composer holds without pixels. */
+    url: string | undefined
     size: number
     remove: () => void
   }
@@ -230,20 +296,26 @@ function Card({ item, url, onOpen, t }: {
  * @returns the rail, or null when there is nothing to show.
  */
 export function DropRail({
-  attachments, onRemoveImage, onAddImages, useInput, inputActions, sessionId,
+  attachments, onAddImages, onAddFiles, onRemoveImage, onRemoveAttachment,
+  useInput, inputActions, sessionId,
   assetOf, textOf, bindImageIntake, bindComposer, useAttached, detach, t,
 }: DropRailProps): ReactNode {
   const attached = useAttached((staged) => staged)
   const [open, setOpen] = useState<string | null>(null)
 
-  // The seat's image intake is the composer's validated path (count, byte and
+  // One verb per concern, whichever name the running harness publishes:
+  // 0.1.2 renamed the seat's owner share, and this registration serves both.
+  const addFiles = onAddFiles ?? onAddImages
+  const removeAttachment = onRemoveAttachment ?? onRemoveImage
+
+  // The seat's file intake is the composer's validated path (count, byte and
   // media-type limits). Publishing it lets this plugin's document listeners —
   // now the only ones, since taking the seat unmounted the shipped entry's —
-  // hand image members back to it.
+  // hand members back to it.
   useEffect(() => {
-    bindImageIntake(onAddImages)
+    bindImageIntake(addFiles)
     return () => { bindImageIntake(undefined) }
-  }, [bindImageIntake, onAddImages])
+  }, [bindImageIntake, addFiles])
 
   const phase = useInput((state) => state.phase)
   const draft = useInput((state) => state.draft) ?? ''
@@ -273,9 +345,12 @@ export function DropRail({
       row: 'image',
       key: `image:${attachment.id}`,
       name: attachment.file.name,
+      // Draft images carry a preview URL; a file-kind draft (0.1.2 widened the
+      // union) has none, so its card renders as an identity row instead of a
+      // thumbnail.
       url: attachment.previewUrl,
       size: attachment.file.size,
-      remove: () => { onRemoveImage(attachment.id) },
+      remove: () => { removeAttachment?.(attachment.id) },
     }))
     const files: RailItem[] = attached.map((entry) => ({
       row: 'file',

@@ -23,7 +23,7 @@ for (const file of readdirSync('docs').filter(f => f.endsWith('.md') && !f.endsW
 }
 for (const file of ['README.md','README.zh.md']) {
   const text = read(file)
-  for (const claim of ['512','64 KiB','0.1.1-rc.2','crosery-drop']) assert.ok(text.includes(claim), file + ' omits ' + claim)
+  for (const claim of ['512','64 KiB','0.1.1-rc.2','0.1.5-rc.2','crosery-drop']) assert.ok(text.includes(claim), file + ' omits ' + claim)
 }
 const shots = JSON.parse(read('screenshots.json'))
 assert.ok(Array.isArray(shots) && shots.length >= 1 && shots.length <= 8)

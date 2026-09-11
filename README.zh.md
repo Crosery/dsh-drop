@@ -12,13 +12,13 @@
 
 ## 安装
 
-要求 DSH Web **0.1.1-rc.2** 包序列、PATH 上有 pnpm，以及 DSH 支持的偶数 Node 主版本（CI：22.19 / 24）。安装预构建包，然后**重启 profile**：
+要求 DSH Web **0.1.1** 及以上包序列（已在 0.1.1-rc.2、0.1.2-rc.1、0.1.5-rc.1、0.1.5-rc.2、0.1.5-alpha.2 上验证）、PATH 上有 pnpm，以及 DSH 支持的偶数 Node 主版本（CI：22.19 / 24）。安装预构建包，然后**重启 profile**：
 
 ~~~sh
 dsh plugin --profile web add https://github.com/Crosery/dsh-drop/releases/latest/download/dsh-drop.tgz
 ~~~
 
-tarball 已包含双半边产物，安装不用运行插件构建。固定版本时将 latest/download 替换为 download/v0.1.0。当前没有发布 npm。若本地 patch 已挂载 @crosery/dsh-drop，勿重复安装。
+tarball 已包含双半边产物，安装不用运行插件构建。固定版本时将 latest/download 替换为 download/v0.1.1。仓库同时提交了构建产物，因此 `dsh plugin --profile web add github:crosery/dsh-drop` 不需要任何构建授权即可安装；需要可复现时优先用打 tag 的 tarball。若本地 patch 已挂载 @crosery/dsh-drop，勿重复安装。
 
 ~~~sh
 dsh plugin --profile web remove @crosery/dsh-drop

@@ -26,7 +26,11 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
-import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
+// Type-only: pulls the ctx.settings merge. The two value helpers this plugin
+// used to import (`installSettingsSection`, `settingsNamespace`) were removed
+// in 0.1.2; `mountSettingsSection` below drives whichever API the running
+// harness publishes instead of importing one train's.
+import type {} from '@deepseek-ai/dsh-settings'
 // Type-only: pulls the ctx.webServer merge without a value dependency.
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import {
@@ -49,14 +53,131 @@ export { insideRoot, requestedName, publishStage, stageHandler } from './stage-r
 export { claimMatches, readClaim, resolveHandler } from './resolve-route.ts'
 export { pruneStage } from './prune.ts'
 
-/** Settings namespace this plugin owns. */
-export const DROP_NAMESPACE = settingsNamespace(DROP_SETTINGS_NAMESPACE)
+/**
+ * Settings namespace this plugin owns, as the settings service keys it.
+ *
+ * A plain string rather than a branded one: 0.1.2 deleted the
+ * `settingsNamespace()` constructor that produced the brand, and the service
+ * validates the name at registration either way.
+ */
+export const DROP_NAMESPACE = DROP_SETTINGS_NAMESPACE
 
 export const name = '@crosery/dsh-drop'
 
 export type Config = DropSettings
 
 export const Config = DropSettingsSchema
+
+/** One registered namespace's owner-facing handle, as this plugin reads it. */
+interface SettingsScopeLike {
+  get(): DropSettings
+  watch(callback: () => void): () => void
+}
+
+/** Callbacks a mount invokes. Identical on every harness train that has a mount. */
+export interface SettingsHooks {
+  /** Receive the authoritative value: the resolved section while one is attached. */
+  setSource(current: () => DropSettings): void
+  /** Re-judge derived state after an attach, a detach, or a committed change. */
+  onChange(): void
+  /** Reject a resolved section this plugin could not act on. */
+  validate?: (value: DropSettings) => void
+}
+
+/**
+ * Structural view of the settings service.
+ *
+ * 0.1.2 moved this mount from a package export to a service method:
+ * `installSettingsSection(ctx, ns, schema, entry, hooks)` became
+ * `ctx.settings.installSection(owner, ns, schema, entry, hooks)`, and the
+ * `settingsNamespace()` brand constructor went with it. The hooks and the
+ * registration they wire are unchanged, so this plugin drives whichever
+ * surface the running harness publishes.
+ *
+ * A static import of the removed export is what actually breaks a user: ESM
+ * resolves named exports before any code runs, so on 0.1.2 and later the whole
+ * host entry fails to load — `does not provide an export named
+ * 'installSettingsSection'` — instead of degrading to entry-config behavior.
+ */
+interface SettingsServiceLike {
+  installSection?(
+    owner: Context,
+    ns: string,
+    schema: unknown,
+    entry: DropSettings,
+    hooks: SettingsHooks,
+  ): void
+  register?(
+    ns: string,
+    schema: unknown,
+    options: { base?: Partial<DropSettings>; validate?: (value: DropSettings) => void },
+  ): SettingsScopeLike
+}
+
+/**
+ * Value mirror of cordis's `FiberState` members {@link isUnloading} compares
+ * against. A const enum has no runtime object to import, and the comparison has
+ * to run — the same mirror the harness itself carries for this check.
+ */
+const FIBER_DISPOSED = 4
+const FIBER_UNLOADING = 5
+
+/**
+ * Whether this plugin's own fiber is tearing down, rather than merely losing the
+ * settings service.
+ *
+ * The detach path exists to hand a *still-running* plugin back its composition
+ * entry. When the plugin itself is unloading there is nothing to fall back to:
+ * re-running the retention pass against the entry would act on a fiber that is
+ * already disposing.
+ * @param ctx - this plugin's context.
+ * @returns true while its fiber is unloading or disposed.
+ */
+function isUnloading(ctx: Context): boolean {
+  const state = ctx.fiber?.state
+  return state === FIBER_UNLOADING || state === FIBER_DISPOSED
+}
+
+/**
+ * Mount the `crosery-drop` namespace over whichever settings API exists.
+ *
+ * Only called while a settings service is present: a composition without one
+ * keeps the composition entry as the sole source, which {@link apply}
+ * establishes on its own.
+ * @param ctx - plugin context: the mount's owner, and the injection parent.
+ * @param config - composition entry config; both the `base` layer and the
+ *   fallback value once the settings service detaches.
+ * @param hooks - source and change callbacks.
+ */
+export function mountSettingsSection(ctx: Context, config: DropSettings, hooks: SettingsHooks): void {
+  ctx.inject(['settings'], (scoped) => {
+    const settings = scoped.settings as unknown as SettingsServiceLike
+    if (typeof settings.installSection === 'function') {
+      settings.installSection(ctx, DROP_NAMESPACE, DropSettingsSchema, config, hooks)
+      return
+    }
+    // 0.1.1 and earlier: drive the registration the removed helper drove, so
+    // settings keep working across the rename instead of silently reverting to
+    // the composition entry.
+    if (typeof settings.register !== 'function') return
+    const scope = settings.register(DROP_NAMESPACE, DropSettingsSchema, {
+      base: config,
+      validate: hooks.validate,
+    })
+    hooks.setSource(() => scope.get())
+    scoped.effect(() => () => {
+      // Owner unload is not a detach: see {@link isUnloading}.
+      if (isUnloading(ctx)) return
+      hooks.setSource(() => config)
+      hooks.onChange()
+    }, '@crosery/dsh-drop: settings detach')
+    hooks.onChange()
+    scope.watch(() => {
+      if (isUnloading(ctx)) return
+      hooks.onChange()
+    })
+  })
+}
 
 /**
  * Mount the settings section and the staging route.
@@ -109,7 +230,7 @@ export function apply(ctx: Context, config: Config): void {
     })
   }
 
-  installSettingsSection(ctx, DROP_NAMESPACE, DropSettingsSchema, config, {
+  mountSettingsSection(ctx, config, {
     setSource: (current) => { source = current },
     onChange: prune,
     // `natural()` admits zero, and a zero ceiling refuses every drop while
