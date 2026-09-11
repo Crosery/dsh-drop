@@ -7,7 +7,7 @@
 3. Push a matching v-prefixed tag. The Release workflow checks tag/version equality, validates, builds and packs before publishing.
 4. Verify the public asset downloads, contains cordis.patch.yml plus both bundles, and installs without building source.
 
-The stable asset is dsh-drop.tgz: https://github.com/Crosery/dsh-drop/releases/latest/download/dsh-drop.tgz. Keep the filename version-free: latest is resolved dynamically but the asset name is literal. Pin releases/download/v0.1.1/dsh-drop.tgz for reproducible installations. SHA256SUMS accompanies each release. npm publishing is not configured; do not advertise npm add as an available channel. The repository ships the built halves and no prepare script, so a git source installation needs no allowBuilds approval; the tarball remains the reproducible channel.
+The stable asset is dsh-drop.tgz: https://github.com/Crosery/dsh-drop/releases/latest/download/dsh-drop.tgz. Keep the filename version-free: latest is resolved dynamically but the asset name is literal. Pin releases/download/v0.1.3/dsh-drop.tgz for reproducible installations. SHA256SUMS accompanies each release. npm publishing is not configured; do not advertise npm add as an available channel. The repository ships the built halves and no prepare script, so a git source installation needs no allowBuilds approval; the tarball remains the reproducible channel.
 
 ## Market
 

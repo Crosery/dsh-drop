@@ -367,7 +367,7 @@ export function DropRail({
     // the composer's image array, the other this plugin's staging list — so
     // there is no single sequence to interleave them into.
     return [...images, ...files]
-  }, [attachments, attached, assetOf, onRemoveImage, detach])
+  }, [attachments, attached, assetOf, removeAttachment, detach])
 
   const overflow = useRailOverflow(items.length)
   const previewed = items.find((item) => item.key === open) ?? null

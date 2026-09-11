@@ -2,22 +2,22 @@
 
 > **English** · [中文](harness-compatibility.zh.md) · [Index](README.md)
 
-The reproducible baseline is the published 0.1.1-rc.2 DSH package train with Cordis 4.0.2, and this plugin is verified end to end against every train from there through 0.1.5. Host peers admit each of those prerelease tuples explicitly, alpha lines included. Two separate traps live here, and the peer range has to defeat both. A wildcard or an apparently broad stable range excludes every prerelease under node-semver. And a range whose only prerelease comparators sit on the `-rc` side of a tuple excludes that tuple's alphas outright — `>=0.1.5-rc.0` does not match `0.1.5-alpha.2`, because `alpha` sorts below `rc`. Each verified tuple therefore carries both an alpha and an rc branch; the invariant checker verifies each pinned dev version against the range, and the marketplace guidelines call this out by name. Keep official runtime service packages as peers and mirror their exact tested versions in devDependencies. No local link:, file: or workspace: dependencies belong in a release checkout.
+The reproducible baseline is the published 0.1.1-rc.2 DSH package train with Cordis 4.0.2, and this plugin is verified end to end against every train from there through 0.1.5. Host peers admit each of those prerelease tuples explicitly, alpha lines included. Two separate traps live here, and the peer range has to defeat both. A wildcard or an apparently broad stable range excludes every prerelease under node-semver. And a range whose only prerelease comparators sit on the `-rc` side of a tuple excludes that tuple's alphas outright — `>=0.1.5-rc.0` does not match `0.1.5-alpha.2`, because `alpha` sorts below `rc`. Each verified tuple therefore carries both an alpha and an rc branch; the invariant checker verifies each pinned dev version against the range and, since 0.1.3, every train listed below as well as the absence of anything under the documented floor. and the marketplace guidelines call this out by name. Keep official runtime service packages as peers and mirror their exact tested versions in devDependencies. No local link:, file: or workspace: dependencies belong in a release checkout.
 
 ## Verified trains
 
 | Train | Result |
 | --- | --- |
-| 0.1.1-rc.2 | typecheck, build, 110 tests |
-| 0.1.2-rc.1 | typecheck, build, 110 tests |
-| 0.1.5-rc.1 | typecheck, build, 110 tests |
-| 0.1.5-rc.2 | typecheck, build, 110 tests |
-| 0.1.5-alpha.2 | typecheck, build, 110 tests |
+| 0.1.1-rc.2 | typecheck, 110 tests |
+| 0.1.2-rc.1 | typecheck, 110 tests |
 | 0.1.2-alpha.5 | typecheck, 110 tests |
 | 0.1.3-alpha.2 | typecheck, 110 tests |
+| 0.1.5-rc.1 | typecheck, 110 tests |
+| 0.1.5-rc.2 | typecheck, 110 tests |
 | 0.1.5-alpha.1 | typecheck, 110 tests |
+| 0.1.5-alpha.2 | typecheck, 110 tests |
 
-Each row is a scratch copy with every `@deepseek-ai/dsh-*` devDependency repointed at that exact published version, then `npm install --ignore-scripts`, `npm run typecheck` and `npm test`. The scheduled harness-compat workflow probes next and alpha tags and opens or updates an upstream-drift issue on failure. It does not publish or widen peer ranges automatically. Missing tags are reported rather than treated as compatible.
+Each row is a scratch copy with every `@deepseek-ai/dsh-*` devDependency repointed at that exact published version, then `npm install --ignore-scripts`, `npm run typecheck` and `npm test` — the steps the compatibility table records and nothing more. A dev pin the train never published keeps the version this repository pins: `@deepseek-ai/dsh-client-store` on 0.1.1-rc.2 is the standing case, since its oldest publish is 0.1.2-alpha.2. `npm run build`, `npm run check` and `npm run check:dist` run on the working tree and in CI on Node 22.19 and 24, not per matrix row. The scheduled harness-compat workflow probes next and alpha tags and opens or updates an upstream-drift issue on failure. It does not publish or widen peer ranges automatically. Missing tags are reported rather than treated as compatible.
 
 ## What the 0.1.2 train changed
 
