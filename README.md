@@ -18,7 +18,7 @@ Requires DSH Web from the **0.1.1** train or later (verified against 0.1.1-rc.2,
 dsh plugin --profile web add https://github.com/Crosery/dsh-drop/releases/latest/download/dsh-drop.tgz
 ~~~
 
-The tarball includes both compiled halves, so installation does not run a plugin build. For a pinned install, replace latest/download with download/v0.1.1. The repository also ships the built halves, so `dsh plugin --profile web add github:crosery/dsh-drop` installs with no build approval; prefer the tag-pinned tarball for reproducibility. Do not install a second copy if your local patch already mounts @crosery/dsh-drop.
+The tarball includes both compiled halves, so installation does not run a plugin build. For a pinned install, replace latest/download with download/v0.1.3. The repository also ships the built halves, so `dsh plugin --profile web add github:crosery/dsh-drop` installs with no build approval; prefer the tag-pinned tarball for reproducibility. Do not install a second copy if your local patch already mounts @crosery/dsh-drop.
 
 ~~~sh
 dsh plugin --profile web remove @crosery/dsh-drop

@@ -17,6 +17,28 @@ for (const [name, range] of Object.entries(pkg.peerDependencies)) {
   assert.ok(semver.valid(pkg.devDependencies[name]), 'peer needs an exact tested pin: ' + name)
   assert.ok(semver.satisfies(pkg.devDependencies[name], range), 'peer rejects tested pin: ' + name)
 }
+
+// The compatibility table and the manifests are two statements of the same
+// claim, and only one of them is executable. Every train
+// docs/harness-compatibility.md lists as verified must be admitted by each host
+// peer range, and nothing below the 0.1.1 floor the README states may be: an
+// unverified combination that resolves is the failure this catches, and it is
+// invisible to `npm install`.
+const VERIFIED_TRAINS = [
+  '0.1.1-rc.2', '0.1.2-rc.1', '0.1.2-alpha.5', '0.1.3-alpha.2',
+  '0.1.5-rc.1', '0.1.5-rc.2', '0.1.5-alpha.1', '0.1.5-alpha.2',
+]
+/** Published builds under the documented floor; each must stay out. */
+const BELOW_FLOOR = ['0.1.0-rc.2', '0.1.0-rc.6', '0.1.0-rc.8']
+for (const [name, range] of Object.entries(pkg.peerDependencies)) {
+  if (name === '@deepseek-ai/cordis') continue
+  for (const train of VERIFIED_TRAINS) {
+    assert.ok(semver.satisfies(train, range), `${name} rejects the verified train ${train}`)
+  }
+  for (const train of BELOW_FLOOR) {
+    assert.ok(!semver.satisfies(train, range), `${name} admits ${train}, which is below the documented floor`)
+  }
+}
 assert.equal(read('CLAUDE.md').trim(), '@AGENTS.md')
 for (const file of readdirSync('docs').filter(f => f.endsWith('.md') && !f.endsWith('.zh.md'))) {
   assert.ok(existsSync('docs/' + file.replace('.md','.zh.md')), 'unpaired doc: ' + file)

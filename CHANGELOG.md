@@ -2,6 +2,13 @@
 
 > **English** · [中文](CHANGELOG.zh.md)
 
+## 0.1.3
+
+- Fix the rail's `useMemo` dependency list: the image rows close over the resolved remove verb, so a train that supplies only `onRemoveAttachment` (0.1.2 and later, where `onRemoveImage` is always absent) could keep a stale handler across renders.
+- Drop the `>=0.1.0-rc.1 <0.1.1-0` peer branch. It was inherited rather than verified and admitted the 0.1.0-rc trains this repository documents as unsupported; the range now starts at the 0.1.1 floor the README states.
+- `npm run check` now asserts every documented train against the peer ranges and that nothing below the floor is admitted, so the prose and the manifest cannot drift apart again.
+- Point the pinned-install examples at the current release.
+
 ## 0.1.2
 
 - Peer ranges admit the alpha lines. Every tuple previously carried only `-rc` comparators, and `alpha` sorts below `rc` under semver, so `>=0.1.5-rc.0` did not match `0.1.5-alpha.2` — every alpha harness build was rejected, a trap the marketplace guidelines call out by name. Eight verified trains (including 0.1.2-alpha.5, 0.1.3-alpha.2 and 0.1.5-alpha.1/2) are now covered by explicit branches.
@@ -15,7 +22,6 @@
 - Ship the built halves in the repository and drop the `prepare` script: a git install no longer needs an `allowBuilds` approval, which is what made the plugin marketplace's install fail with `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED`. `npm run check:dist` keeps the committed dist honest.
 - Add `@deepseek-ai/dsh-client-store` as a dev pin: from 0.1.2 `dsh-client-ui-slots` re-exports its selector-hook types from there, and without it every hook silently lost its parameter type.
 - Widen peer ranges to the verified trains only, and fail the compatibility job's drift issue with which packages a train is missing.
-- Admit the alpha lines explicitly. Each verified tuple now carries both an alpha and an `-rc` branch: a range with only `-rc` comparators excludes that tuple's alphas outright, so the previous range rejected every alpha build of the harness.
 
 ## 0.1.0
 
