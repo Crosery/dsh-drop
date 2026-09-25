@@ -26,3 +26,33 @@ jobs:
       - run: npm run build
       - run: npm run check
       - run: npm run check:dist
+
+  # The same four stages harness-compat.yml runs on its schedule — types
+  # (with the bundle's seed reads), tests, peer admission and a real boot of
+  # the packed plugin — against the pinned train and the floor. These two gate
+  # a merge: in branch protection, require `node 22.19`, `node 24`,
+  # `harness / harness@pinned` and `harness / harness@floor`.
+  #
+  # `issues: write` is requested by the called workflow's verdict step and is
+  # never used here (`report` stays false); a caller cannot grant a called
+  # workflow less than it declares. A fork's pull_request token is read-only
+  # regardless.
+  harness:
+    permissions:
+      contents: read
+      issues: write
+    uses: ./.github/workflows/harness-compat.yml
+    with:
+      cells: pinned,floor
+
+  # What the desktop app ships today, resolved from its update feeds, and the
+  # npm Web app at that exact version. Visible on every PR but deliberately not
+  # a required check: the feed moves under open PRs, and the scheduled run
+  # owns that signal.
+  desktop:
+    permissions:
+      contents: read
+      issues: write
+    uses: ./.github/workflows/harness-compat.yml
+    with:
+      cells: desktop
