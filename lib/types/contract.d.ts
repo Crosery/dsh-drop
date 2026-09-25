@@ -93,7 +93,7 @@ export interface StageOk {
 /** Refused staging answer. */
 export interface StageErr {
     /** Machine-readable reason. */
-    error: 'method' | 'forbidden' | 'too-large' | 'write-failed' | 'no-match';
+    error: 'method' | 'forbidden' | 'unauthorized' | 'too-large' | 'write-failed' | 'no-match';
 }
 /**
  * A claim that a path on disk IS the dropped file.
@@ -127,6 +127,14 @@ export interface ResolveOk {
  * in which a file would have to be replaced for the match to be wrong.
  */
 export declare const MTIME_TOLERANCE_MS = 2000;
+/**
+ * Characters an `@` mention cannot carry.
+ *
+ * The same class upstream `formatFileMention()` refuses: C0 and C1 controls,
+ * DEL, and the double quote that delimits a quoted mention. A path containing
+ * one cannot be written as a reference that parses back to itself.
+ */
+export declare const UNMENTIONABLE: RegExp;
 /**
  * Decode one `file://` URL into an absolute path.
  * @param url - candidate URL text, already trimmed.

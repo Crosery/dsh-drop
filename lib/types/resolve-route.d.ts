@@ -19,6 +19,7 @@
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { type ResolveRequest } from './contract.ts';
+import { type RequestRejection } from './stage-route.ts';
 /**
  * Read and parse the JSON claim.
  * @param req - the request.
@@ -35,8 +36,14 @@ export declare function claimMatches(entry: {
     size: number;
     mtimeMs: number;
 }, claim: ResolveRequest): boolean;
+/** Runtime knobs of the resolve route. */
+export interface ResolveOptions {
+    /** The Host's admission check, when the running harness has one. */
+    reject?: RequestRejection | undefined;
+}
 /**
  * Build the resolve handler.
+ * @param opts - the admission check.
  * @returns a node:http handler owning the full response lifecycle.
  */
-export declare function resolveHandler(): (req: IncomingMessage, res: ServerResponse) => Promise<void>;
+export declare function resolveHandler(opts?: ResolveOptions): (req: IncomingMessage, res: ServerResponse) => Promise<void>;

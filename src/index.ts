@@ -20,10 +20,18 @@
  * Either way the composer receives an `@` mention of a path rather than the
  * file's contents. `@` references are plain prompt text upstream (see
  * `@deepseek-ai/dsh-file-reference`), so a dropped 40 MB log costs a path's
- * worth of tokens until the model decides to read it.
+ * worth of tokens until the model decides to read it. (Inside the desktop app
+ * the browser half asks the app for the path first and needs neither route.)
+ *
+ * Both routes are raw `webServer` routes, which the harness does not
+ * authenticate by itself. From 0.1.7 each request is put through the Host's
+ * own admission check (`connection.requestRejection`: its Host/Origin fence
+ * and login-cookie authentication) before anything else; earlier trains have
+ * no such check, and the routes keep their cross-site gates only.
  * @module @crosery/dsh-drop
  */
 
+import type { IncomingHttpHeaders } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 // Type-only: pulls the ctx.settings merge. The two value helpers this plugin
@@ -37,7 +45,7 @@ import {
   DROP_SETTINGS_NAMESPACE, RESOLVE_ROUTE, STAGE_DIR, STAGE_ROUTE, type DropSettings,
 } from './contract.ts'
 import { DropSettingsSchema } from './settings.ts'
-import { stageHandler } from './stage-route.ts'
+import { stageHandler, type RequestRejection } from './stage-route.ts'
 import { resolveHandler } from './resolve-route.ts'
 import { pruneStage } from './prune.ts'
 
@@ -49,8 +57,10 @@ export {
 } from './contract.ts'
 export type { DropSettings, ResolveOk, ResolveRequest, StageErr, StageOk } from './contract.ts'
 export { DropSettingsSchema } from './settings.ts'
-export { insideRoot, requestedName, publishStage, stageHandler } from './stage-route.ts'
+export { crossSite, insideRoot, refused, requestedName, publishStage, stageHandler } from './stage-route.ts'
+export type { RequestRejection, StageOptions } from './stage-route.ts'
 export { claimMatches, readClaim, resolveHandler } from './resolve-route.ts'
+export type { ResolveOptions } from './resolve-route.ts'
 export { pruneStage } from './prune.ts'
 
 /**
@@ -86,6 +96,14 @@ export interface SettingsHooks {
 
 /**
  * Structural view of the settings service.
+ *
+ * 0.1.7 replaced both mounts below with `SettingsForms`, which builds its form
+ * from this plugin's exported `Config` for the profile entry (`drop`) and
+ * writes edits into that entry's config — so on 0.1.7 neither method exists,
+ * {@link mountSettingsSection} returns without mounting, and `apply` receives
+ * the edited values as its config. A `crosery-drop` section left in an old
+ * `settings.yaml` is not carried over: 0.1.7's one-time import looks for an
+ * entry named after the section, and this entry is named `drop`.
  *
  * 0.1.2 moved this mount from a package export to a service method:
  * `installSettingsSection(ctx, ns, schema, entry, hooks)` became
@@ -179,6 +197,28 @@ export function mountSettingsSection(ctx: Context, config: DropSettings, hooks: 
   })
 }
 
+/** The Host connection's admission check, as far as this plugin reads it. */
+interface ConnectionLike {
+  requestRejection?: (request: { headers: IncomingHttpHeaders }) => number | undefined
+}
+
+/**
+ * The running Host's admission check for raw Web routes, read per request.
+ *
+ * Read by name at request time rather than injected: `connection` exists from
+ * 0.1.7 only, a hard `inject` would stop the plugin loading on every earlier
+ * train, and the service can come and go with the Web server itself.
+ * @param ctx - this plugin's context.
+ * @returns the check; it admits everything when the Host offers none.
+ */
+export function hostAdmission(ctx: { get(name: string): unknown }): RequestRejection {
+  return (req) => {
+    const connection = ctx.get('connection') as ConnectionLike | undefined
+    if (typeof connection?.requestRejection !== 'function') return undefined
+    return connection.requestRejection(req)
+  }
+}
+
 /**
  * Mount the settings section and the staging route.
  *
@@ -193,6 +233,7 @@ export function mountSettingsSection(ctx: Context, config: DropSettings, hooks: 
 export function apply(ctx: Context, config: Config): void {
   let source = (): DropSettings => config
   const root = dshHomePath(STAGE_DIR)
+  const reject = hostAdmission(ctx)
 
   ctx.inject(['webServer'], (scoped) => {
     scoped.effect(() => scoped.webServer.register({
@@ -201,6 +242,7 @@ export function apply(ctx: Context, config: Config): void {
       handler: stageHandler({
         root: () => root,
         maxBytes: () => source().maxBytes,
+        reject,
       }),
     }), '@crosery/dsh-drop: stage route')
 
@@ -210,7 +252,7 @@ export function apply(ctx: Context, config: Config): void {
     scoped.effect(() => scoped.webServer.register({
       kind: 'exact',
       path: RESOLVE_ROUTE,
-      handler: resolveHandler(),
+      handler: resolveHandler({ reject }),
     }), '@crosery/dsh-drop: resolve route')
   })
 

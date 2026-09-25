@@ -16,6 +16,35 @@
  * @module @crosery/dsh-drop/stage-route
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
+/**
+ * The Host's own admission check for a raw Web route, when it has one.
+ *
+ * From 0.1.7 the harness gates each Web route itself with
+ * `connection.requestRejection(req)`: its Host/Origin fence and its
+ * login-cookie authentication. Routes registered straight on `webServer` are
+ * otherwise open to any local caller. Earlier trains have no such check, and
+ * the callback answers undefined there.
+ * @param req - the request.
+ * @returns 401 or 403 to refuse, undefined to admit.
+ */
+export type RequestRejection = (req: IncomingMessage) => number | undefined;
+/**
+ * Answer a request the Host's admission check refused, if it did.
+ * @param reject - the admission check, when the Host has one.
+ * @param req - the request.
+ * @param res - the response, owned when the answer is true.
+ * @returns true when the request was refused and answered.
+ */
+export declare function refused(reject: RequestRejection | undefined, req: IncomingMessage, res: ServerResponse): boolean;
+/**
+ * Whether Fetch Metadata marks a request as coming from another site.
+ *
+ * Absent is admitted: non-browser clients never send it, and the desktop
+ * app's protocol forwarder strips it before the request reaches the Host.
+ * @param req - the request.
+ * @returns true when the browser declared a cross-origin caller.
+ */
+export declare function crossSite(req: IncomingMessage): boolean;
 /** Runtime knobs the route reads fresh on every request. */
 export interface StageOptions {
     /** Absolute staging root; re-read per request so a settings edit takes effect live. */
@@ -24,6 +53,8 @@ export interface StageOptions {
     maxBytes: () => number;
     /** Clock, injected so tests do not depend on the wall clock. */
     now?: () => number;
+    /** The Host's admission check, when the running harness has one. */
+    reject?: RequestRejection | undefined;
 }
 /**
  * Read the file name the browser declared.

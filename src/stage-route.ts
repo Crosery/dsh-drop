@@ -39,6 +39,60 @@ class TooLargeError extends Error {
 /** How many suffixed candidates to try before giving up on a readable name. */
 const MAX_COLLISION_ATTEMPTS = 100
 
+/**
+ * The Host's own admission check for a raw Web route, when it has one.
+ *
+ * From 0.1.7 the harness gates each Web route itself with
+ * `connection.requestRejection(req)`: its Host/Origin fence and its
+ * login-cookie authentication. Routes registered straight on `webServer` are
+ * otherwise open to any local caller. Earlier trains have no such check, and
+ * the callback answers undefined there.
+ * @param req - the request.
+ * @returns 401 or 403 to refuse, undefined to admit.
+ */
+export type RequestRejection = (req: IncomingMessage) => number | undefined
+
+/**
+ * Answer a request the Host's admission check refused, if it did.
+ * @param reject - the admission check, when the Host has one.
+ * @param req - the request.
+ * @param res - the response, owned when the answer is true.
+ * @returns true when the request was refused and answered.
+ */
+export function refused(reject: RequestRejection | undefined, req: IncomingMessage, res: ServerResponse): boolean {
+  let status: number | undefined
+  try {
+    status = reject?.(req)
+  } catch {
+    // An admission check that throws admits nothing.
+    status = 403
+  }
+  if (status === undefined) return false
+  req.resume()
+  const payload = JSON.stringify({ error: status === 401 ? 'unauthorized' : 'forbidden' } satisfies StageErr)
+  res.writeHead(status, {
+    'content-type': 'application/json; charset=utf-8',
+    'content-length': Buffer.byteLength(payload),
+    'cache-control': 'no-store',
+    'x-content-type-options': 'nosniff',
+  })
+  res.end(payload)
+  return true
+}
+
+/**
+ * Whether Fetch Metadata marks a request as coming from another site.
+ *
+ * Absent is admitted: non-browser clients never send it, and the desktop
+ * app's protocol forwarder strips it before the request reaches the Host.
+ * @param req - the request.
+ * @returns true when the browser declared a cross-origin caller.
+ */
+export function crossSite(req: IncomingMessage): boolean {
+  const site = req.headers['sec-fetch-site']
+  return site !== undefined && site !== 'same-origin'
+}
+
 /** Runtime knobs the route reads fresh on every request. */
 export interface StageOptions {
   /** Absolute staging root; re-read per request so a settings edit takes effect live. */
@@ -47,6 +101,8 @@ export interface StageOptions {
   maxBytes: () => number
   /** Clock, injected so tests do not depend on the wall clock. */
   now?: () => number
+  /** The Host's admission check, when the running harness has one. */
+  reject?: RequestRejection | undefined
 }
 
 /**
@@ -125,6 +181,10 @@ export function stageHandler(opts: StageOptions): (req: IncomingMessage, res: Se
   const clock = opts.now ?? Date.now
 
   return async (req, res) => {
+    // Authentication first: an unauthenticated caller learns nothing, not
+    // even which methods the route takes.
+    if (refused(opts.reject, req, res)) return
+
     if (req.method !== 'POST') {
       json(res, 405, { error: 'method' })
       return
@@ -132,8 +192,7 @@ export function stageHandler(opts: StageOptions): (req: IncomingMessage, res: Se
 
     // A browser simple/form POST cannot supply this non-safelisted header.
     // No CORS permission is granted; Fetch Metadata additionally rejects cross-origin calls.
-    if (typeof req.headers[NAME_HEADER] !== 'string'
-      || (req.headers['sec-fetch-site'] !== undefined && req.headers['sec-fetch-site'] !== 'same-origin')) {
+    if (typeof req.headers[NAME_HEADER] !== 'string' || crossSite(req)) {
       req.resume()
       json(res, 403, { error: 'forbidden' })
       return

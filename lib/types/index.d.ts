@@ -20,16 +20,26 @@
  * Either way the composer receives an `@` mention of a path rather than the
  * file's contents. `@` references are plain prompt text upstream (see
  * `@deepseek-ai/dsh-file-reference`), so a dropped 40 MB log costs a path's
- * worth of tokens until the model decides to read it.
+ * worth of tokens until the model decides to read it. (Inside the desktop app
+ * the browser half asks the app for the path first and needs neither route.)
+ *
+ * Both routes are raw `webServer` routes, which the harness does not
+ * authenticate by itself. From 0.1.7 each request is put through the Host's
+ * own admission check (`connection.requestRejection`: its Host/Origin fence
+ * and login-cookie authentication) before anything else; earlier trains have
+ * no such check, and the routes keep their cross-site gates only.
  * @module @crosery/dsh-drop
  */
 import type { Context } from '@deepseek-ai/cordis';
 import { type DropSettings } from './contract.ts';
+import { type RequestRejection } from './stage-route.ts';
 export { COMPOSER_IMAGE_MEDIA_TYPES, DROP_SETTINGS_NAMESPACE, MTIME_TOLERANCE_MS, RESOLVE_ROUTE, STAGE_DIR, STAGE_ROUTE, fileNameOf, isComposerImageType, isPrunableStageDir, mentionFor, pathFromFileUrl, safeStageName, stageCandidate, stageDayDir, uriListPaths, } from './contract.ts';
 export type { DropSettings, ResolveOk, ResolveRequest, StageErr, StageOk } from './contract.ts';
 export { DropSettingsSchema } from './settings.ts';
-export { insideRoot, requestedName, publishStage, stageHandler } from './stage-route.ts';
+export { crossSite, insideRoot, refused, requestedName, publishStage, stageHandler } from './stage-route.ts';
+export type { RequestRejection, StageOptions } from './stage-route.ts';
 export { claimMatches, readClaim, resolveHandler } from './resolve-route.ts';
+export type { ResolveOptions } from './resolve-route.ts';
 export { pruneStage } from './prune.ts';
 /**
  * Settings namespace this plugin owns, as the settings service keys it.
@@ -63,6 +73,18 @@ export interface SettingsHooks {
  * @param hooks - source and change callbacks.
  */
 export declare function mountSettingsSection(ctx: Context, config: DropSettings, hooks: SettingsHooks): void;
+/**
+ * The running Host's admission check for raw Web routes, read per request.
+ *
+ * Read by name at request time rather than injected: `connection` exists from
+ * 0.1.7 only, a hard `inject` would stop the plugin loading on every earlier
+ * train, and the service can come and go with the Web server itself.
+ * @param ctx - this plugin's context.
+ * @returns the check; it admits everything when the Host offers none.
+ */
+export declare function hostAdmission(ctx: {
+    get(name: string): unknown;
+}): RequestRejection;
 /**
  * Mount the settings section and the staging route.
  *

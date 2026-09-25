@@ -22,8 +22,9 @@ import { stat } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { isAbsolute } from 'node:path'
 import {
-  MTIME_TOLERANCE_MS, type ResolveOk, type ResolveRequest, type StageErr,
+  MTIME_TOLERANCE_MS, UNMENTIONABLE, type ResolveOk, type ResolveRequest, type StageErr,
 } from './contract.ts'
+import { crossSite, refused, type RequestRejection } from './stage-route.ts'
 
 /** Largest claim body accepted; a path plus two numbers is far below this. */
 const MAX_BODY_BYTES = 8192
@@ -64,11 +65,32 @@ export function claimMatches(entry: { size: number, mtimeMs: number }, claim: Re
   return Math.abs(entry.mtimeMs - claim.lastModified) <= MTIME_TOLERANCE_MS
 }
 
+/** Runtime knobs of the resolve route. */
+export interface ResolveOptions {
+  /** The Host's admission check, when the running harness has one. */
+  reject?: RequestRejection | undefined
+}
+
+/**
+ * Whether a request body is declared as JSON.
+ *
+ * `application/json` is not a CORS-safelisted type, so a cross-site page can
+ * only send it after a preflight this route never grants: requiring it keeps
+ * a no-cors form post from reaching the `stat`.
+ * @param req - the request.
+ * @returns true for an `application/json` body.
+ */
+function declaresJson(req: IncomingMessage): boolean {
+  const type = req.headers['content-type']
+  return typeof type === 'string' && type.split(';')[0]!.trim().toLowerCase() === 'application/json'
+}
+
 /**
  * Build the resolve handler.
+ * @param opts - the admission check.
  * @returns a node:http handler owning the full response lifecycle.
  */
-export function resolveHandler(): (req: IncomingMessage, res: ServerResponse) => Promise<void> {
+export function resolveHandler(opts: ResolveOptions = {}): (req: IncomingMessage, res: ServerResponse) => Promise<void> {
   const json = (res: ServerResponse, status: number, body: ResolveOk | StageErr): void => {
     const payload = JSON.stringify(body)
     res.writeHead(status, {
@@ -81,12 +103,20 @@ export function resolveHandler(): (req: IncomingMessage, res: ServerResponse) =>
   }
 
   return async (req, res) => {
+    if (refused(opts.reject, req, res)) return
     if (req.method !== 'POST') {
       json(res, 405, { error: 'method' })
       return
     }
+    // The same cross-site gate the stage route applies: a declared JSON body
+    // and no cross-origin Fetch Metadata.
+    if (!declaresJson(req) || crossSite(req)) {
+      req.resume()
+      json(res, 403, { error: 'forbidden' })
+      return
+    }
     const claim = await readClaim(req)
-    if (claim === undefined || !isAbsolute(claim.path) || /[\u0000-\u001f\u007f"]/.test(claim.path)) {
+    if (claim === undefined || !isAbsolute(claim.path) || UNMENTIONABLE.test(claim.path)) {
       json(res, 404, { error: 'no-match' })
       return
     }

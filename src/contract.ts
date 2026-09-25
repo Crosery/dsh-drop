@@ -129,7 +129,7 @@ export interface StageOk {
 /** Refused staging answer. */
 export interface StageErr {
   /** Machine-readable reason. */
-  error: 'method' | 'forbidden' | 'too-large' | 'write-failed' | 'no-match'
+  error: 'method' | 'forbidden' | 'unauthorized' | 'too-large' | 'write-failed' | 'no-match'
 }
 
 /**
@@ -166,6 +166,15 @@ export interface ResolveOk {
  * in which a file would have to be replaced for the match to be wrong.
  */
 export const MTIME_TOLERANCE_MS = 2000
+
+/**
+ * Characters an `@` mention cannot carry.
+ *
+ * The same class upstream `formatFileMention()` refuses: C0 and C1 controls,
+ * DEL, and the double quote that delimits a quoted mention. A path containing
+ * one cannot be written as a reference that parses back to itself.
+ */
+export const UNMENTIONABLE = /[\u0000-\u001F\u007F-\u009F"]/u
 
 /**
  * Decode one `file://` URL into an absolute path.
@@ -236,7 +245,7 @@ export function safeStageName(raw: string): string {
   // Control characters and double quotes are stripped rather than escaped:
   // `formatFileMention()` upstream refuses to represent either, so a staged
   // name containing one could never be written as an `@` reference.
-  const cleaned = segment.replace(/[\u0000-\u001F\u007F"]/g, '').trim()
+  const cleaned = segment.replace(/[\u0000-\u001F\u007F-\u009F"]/g, '').trim()
   if (cleaned === '' || /^\.+$/.test(cleaned)) return FALLBACK_NAME
 
   const dot = cleaned.lastIndexOf('.')
