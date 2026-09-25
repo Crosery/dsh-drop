@@ -147,7 +147,9 @@ async function target(cell) {
   const { version, source } = await resolveCell(cell)
   out('version', version)
   out('source', source)
-  summary(`### harness@${cell} → ${version} (${source})`)
+  // One heading and one version table per cell: the resolve step (`--repoint`)
+  // writes them; the install and admission steps add their lines under it.
+  if (flags.repoint || !(flags.install || flags.admits)) summary(`### harness@${cell} → ${version} (${source})`)
 
   // The Web app at the same version must exist, or there is nothing to test.
   if (cell !== 'pinned' && !versionsOf(HARNESS).includes(version)) {
@@ -167,7 +169,7 @@ async function target(cell) {
     manifest = repointed.manifest
     writeFileSync(pkgPath, JSON.stringify(manifest, null, 2) + '\n')
   }
-  if (flags.repoint || flags.install) {
+  if (flags.repoint) {
     const exact = Object.entries(manifest.devDependencies).filter(([n]) => n.startsWith('@deepseek-ai/'))
     console.log(`harness devDependencies:\n${exact.map(([n, v]) => `  ${n}@${v}`).join('\n')}`)
     summary(['', '| package | version |', '| --- | --- |', ...exact.map(([n, v]) => `| \`${n}\` | \`${v}\` |`), ''].join('\n'))
@@ -178,10 +180,11 @@ async function target(cell) {
       const result = run(root, 'npm', ['ci', '--no-audit', '--no-fund'])
       if (!result.ok) throw new Error(`npm ci failed:\n${tail(result.output, 40)}`)
       out('via', 'lockfile')
+      summary('- installed from the lockfile')
     } else {
       const result = installTrain(root, manifest, version)
       out('via', result.via)
-      if (result.via !== 'peer graph') summary(`- installed via ${result.via}`)
+      summary(`- installed: ${result.via}`)
       if (!result.ok) {
         if (result.incomplete) throw new Incomplete(`${HARNESS}@${version} does not install even on its own:\n${tail(result.output, 20)}`)
         throw new Error(`install failed:\n${tail(result.output, 40)}`)
