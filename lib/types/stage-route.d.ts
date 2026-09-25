@@ -19,10 +19,10 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 /**
  * The Host's own admission check for a raw Web route, when it has one.
  *
- * From 0.1.7 the harness gates each Web route itself with
+ * From 0.1.2 the harness can gate a Web route itself with
  * `connection.requestRejection(req)`: its Host/Origin fence and its
  * login-cookie authentication. Routes registered straight on `webServer` are
- * otherwise open to any local caller. Earlier trains have no such check, and
+ * otherwise open to any local caller. 0.1.0 and 0.1.1 have no such check, and
  * the callback answers undefined there.
  * @param req - the request.
  * @returns 401 or 403 to refuse, undefined to admit.

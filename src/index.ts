@@ -29,9 +29,9 @@
  * per folder, published whole under its own name on commit.
  *
  * All three are raw `webServer` routes, which the harness does not
- * authenticate by itself. From 0.1.7 each request is put through the Host's
+ * authenticate by itself. From 0.1.2 each request is put through the Host's
  * own admission check (`connection.requestRejection`: its Host/Origin fence
- * and login-cookie authentication) before anything else; earlier trains have
+ * and login-cookie authentication) before anything else; 0.1.0 and 0.1.1 have
  * no such check, and the routes keep their cross-site gates only.
  * @module @crosery/dsh-drop
  */
@@ -222,8 +222,8 @@ interface ConnectionLike {
  * The running Host's admission check for raw Web routes, read per request.
  *
  * Read by name at request time rather than injected: `connection` exists from
- * 0.1.7 only, a hard `inject` would stop the plugin loading on every earlier
- * train, and the service can come and go with the Web server itself.
+ * 0.1.2 only, a hard `inject` would stop the plugin loading on 0.1.0 and
+ * 0.1.1, and the service can come and go with the Web server itself.
  * @param ctx - this plugin's context.
  * @returns the check; it admits everything when the Host offers none.
  */

@@ -1,7 +1,7 @@
 /**
  * The admission gates in front of both Host routes, over real node:http.
  *
- * From 0.1.7 the harness authenticates each Web route it is asked to
+ * From 0.1.2 the harness authenticates each Web route it is asked to
  * (`connection.requestRejection`); the routes must put every request through
  * that check before doing anything, and still refuse cross-site callers on
  * trains without one. The resolve route used to have no gate at all.
