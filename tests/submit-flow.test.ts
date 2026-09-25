@@ -198,6 +198,12 @@ const ready = (id: number, path: string): AttachedFile =>
   ({ id, key: `staged:${id}`, kind: 'file', status: 'ready', name: path, path, how: 'copied' })
 const pending = (id: number): AttachedFile =>
   ({ id, key: `staged:${id}`, kind: 'file', status: 'pending', name: 'big.mov' })
+const folder = (id: number, path: string): AttachedFile =>
+  ({ id, key: `staged:${id}`, kind: 'directory', status: 'ready', name: path, path, how: 'copied' })
+const uploadingFolder = (id: number): AttachedFile => ({
+  id, key: `staged:${id}`, kind: 'directory', status: 'pending', name: 'proj',
+  progress: { done: 3, total: 40, bytes: 100, totalBytes: 4000 },
+})
 
 /** The Lexical composer's DOM: a card holding the editor and the control row. */
 function lexicalCard() {
@@ -285,6 +291,34 @@ describe('Lexical composer (0.1.2 onward)', () => {
       assert.equal(sent, false)
       assert.deepEqual(guard.notices, ['info:waiting 1'])
       assert.equal(composer.text, 'hello')
+    } finally { guard.release() }
+  })
+
+  it('sends a ready folder as one trailing-slash mention', async () => {
+    const composer = new Composer()
+    composer.text = 'review this'
+    const { input } = lexicalCard()
+    const guard = harness(composer, [folder(1, '/tmp/drops/proj'), folder(2, '/Users/a/my site'), ready(3, '/tmp/a.pdf')])
+    try {
+      dispatch('keydown', input, {}, () => { composer.send() })
+      assert.deepEqual(composer.sent, ['review this\n\n@/tmp/drops/proj/\n@"/Users/a/my site/"\n@/tmp/a.pdf'])
+      await tick()
+      assert.deepEqual(guard.staged(), [])
+    } finally { guard.release() }
+  })
+
+  it('holds the send, not a partial list, while a folder is still uploading', () => {
+    const composer = new Composer()
+    composer.text = 'hello'
+    const { input } = lexicalCard()
+    const guard = harness(composer, [ready(1, '/tmp/a.pdf'), uploadingFolder(2)])
+    try {
+      let sent = false
+      assert.equal(dispatch('keydown', input, {}, () => { sent = true }), true)
+      assert.equal(sent, false)
+      assert.deepEqual(guard.notices, ['info:waiting 1'])
+      assert.equal(composer.text, 'hello', 'nothing was appended')
+      assert.equal(guard.staged().length, 2)
     } finally { guard.release() }
   })
 
@@ -418,6 +452,24 @@ describe('textarea composer (0.1.0–0.1.1)', () => {
 
       guard.release()
       assert.equal(listeners.size, 0, 'every listener is removed')
+    } finally { guard.release() }
+  })
+
+  it('sends a folder with its trailing slash, and waits for one still uploading', () => {
+    const composer = new Composer()
+    composer.text = 'see'
+    const textarea = new FakeTextArea('textarea')
+    new FakeElement('div', { 'data-composer-card': '' }, [textarea])
+    const waiting = harness(composer, [uploadingFolder(1)])
+    try {
+      assert.equal(dispatch('keydown', textarea, {}), true, 'held')
+      assert.deepEqual(composer.sent, [])
+      assert.deepEqual(waiting.notices, ['info:waiting 1'])
+    } finally { waiting.release() }
+    const guard = harness(composer, [folder(2, '/tmp/drops/proj')])
+    try {
+      assert.equal(dispatch('keydown', textarea, {}), true)
+      assert.deepEqual(composer.sent, ['see\n\n@/tmp/drops/proj/'])
     } finally { guard.release() }
   })
 

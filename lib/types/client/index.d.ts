@@ -15,7 +15,10 @@
  *   otherwise — and held beside the draft as a staged reference, never
  *   written into it. `submit-guard.ts` appends the mentions as the message is
  *   sent, so a dropped file leaves the text box exactly as the user typed it.
- * - **Folders** are reported and skipped for now.
+ * - **Folders** become one reference each, `@/path/to/folder/`: referenced in
+ *   place when the desktop app or the drag vouches for a path, otherwise
+ *   walked and copied to the Host with their structure (`folder-acquire.ts`).
+ *   Images inside a folder travel with the folder, not as image attachments.
  *
  * Drop and paste are the same operation behind two gestures: both carry a
  * `DataTransfer`, both are claimed by the same rule, and both end in the same
@@ -53,6 +56,10 @@ export { DROP_NS, en, zh } from './locales.ts';
 export type { DropKey } from './locales.ts';
 export { acquire, bridgePath, hintFor, hostPathBridge } from './acquire.ts';
 export type { Acquired, Acquisition, HostPathBridge } from './acquire.ts';
+export { acquireFolder, countFolder, HostRefusal } from './folder-acquire.ts';
+export type { FolderOutcome, FolderProgress } from './folder-acquire.ts';
+export { listingOf, sampleOf, walkFolder } from '../folder.ts';
+export type { EntryLike, ReaderLike, WalkedFile, WalkOptions, WalkResult } from '../folder.ts';
 export { claimsTransfer as claimsTransferShape, fileNameOf, freshFiles, mentionFor, pasteTextIsFileNames, planDrop, uriListPaths, } from '../contract.ts';
 export type { DropPlan, DroppedEntry, StagedCandidate, TransferShape } from '../contract.ts';
 export { dropKindOf, extensionOf, formatDropBytes, kindBadge, looksBinary, mediaTypeFor, } from '../preview.ts';

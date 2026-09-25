@@ -89,3 +89,18 @@ export function RetryGlyph({ size }: GlyphProps): ReactNode {
     </Svg>
   )
 }
+
+/** A folder, for a referenced folder's card. */
+export function FolderGlyph({ size }: GlyphProps): ReactNode {
+  return (
+    <Svg size={size}>
+      <path
+        d="M1.75 4.25a1 1 0 011-1h3.1l1.4 1.5h5.99a1 1 0 011 1v6.5a1 1 0 01-1 1H2.75a1 1 0 01-1-1v-8z"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinejoin="round"
+      />
+      <path d="M1.75 6.25h12.5" stroke="currentColor" strokeWidth="1.2" />
+    </Svg>
+  )
+}

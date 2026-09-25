@@ -15,7 +15,10 @@
  *   otherwise — and held beside the draft as a staged reference, never
  *   written into it. `submit-guard.ts` appends the mentions as the message is
  *   sent, so a dropped file leaves the text box exactly as the user typed it.
- * - **Folders** are reported and skipped for now.
+ * - **Folders** become one reference each, `@/path/to/folder/`: referenced in
+ *   place when the desktop app or the drag vouches for a path, otherwise
+ *   walked and copied to the Host with their structure (`folder-acquire.ts`).
+ *   Images inside a folder travel with the folder, not as image attachments.
  *
  * Drop and paste are the same operation behind two gestures: both carry a
  * `DataTransfer`, both are claimed by the same rule, and both end in the same
@@ -49,6 +52,8 @@ import { AttachedFiles } from './attached.ts'
 import { installSubmitGuard } from './submit-guard.ts'
 import { PreviewStore } from './preview-store.ts'
 import { acquire, bridgePath, hostPathBridge } from './acquire.ts'
+import { acquireFolder, countFolder } from './folder-acquire.ts'
+import type { EntryLike } from '../folder.ts'
 import { RailRegistry, type RailRoute } from './registry.ts'
 import type { ScopeLike } from './composer-face.ts'
 
@@ -88,6 +93,10 @@ export { DROP_NS, en, zh } from './locales.ts'
 export type { DropKey } from './locales.ts'
 export { acquire, bridgePath, hintFor, hostPathBridge } from './acquire.ts'
 export type { Acquired, Acquisition, HostPathBridge } from './acquire.ts'
+export { acquireFolder, countFolder, HostRefusal } from './folder-acquire.ts'
+export type { FolderOutcome, FolderProgress } from './folder-acquire.ts'
+export { listingOf, sampleOf, walkFolder } from '../folder.ts'
+export type { EntryLike, ReaderLike, WalkedFile, WalkOptions, WalkResult } from '../folder.ts'
 export {
   claimsTransfer as claimsTransferShape, fileNameOf, freshFiles, mentionFor, pasteTextIsFileNames,
   planDrop, uriListPaths,
@@ -184,6 +193,33 @@ export function readHints(transfer: DataTransfer): string[] {
 }
 
 /**
+ * A signal that aborts when either input does.
+ *
+ * Written out rather than `AbortSignal.any`, which older Safari lacks.
+ * @param a - one signal.
+ * @param b - the other.
+ * @returns the combined signal.
+ */
+function linked(a: AbortSignal, b: AbortSignal): { signal: AbortSignal, release: () => void } {
+  const both = new AbortController()
+  const release = (): void => {
+    a.removeEventListener('abort', forward)
+    b.removeEventListener('abort', forward)
+  }
+  const forward = (event: Event): void => {
+    release()
+    both.abort((event.target as AbortSignal).reason)
+  }
+  if (a.aborted || b.aborted) {
+    both.abort(a.aborted ? a.reason : b.reason)
+    return { signal: both.signal, release }
+  }
+  a.addEventListener('abort', forward)
+  b.addEventListener('abort', forward)
+  return { signal: both.signal, release }
+}
+
+/**
  * Whether an element takes typed text on its own, outside any composer.
  * @param target - an event target.
  * @returns true for inputs, textareas and contenteditable hosts.
@@ -205,10 +241,17 @@ export function apply(ctx: ClientContext): void {
   // URLs outlive the elements that use them.
   const previews = new PreviewStore()
   ctx.effect(() => () => { previews.dispose() }, '@crosery/dsh-drop: preview material')
+  // Folder acquisitions in flight, by entry id: removing the card aborts its
+  // upload, and the Host drops the batch.
+  const folderJobs = new Map<number, AbortController>()
   // Files staged for the next message, held beside the draft the way the
   // composer holds its attachment ids — which is what keeps the text box
   // clean. An entry that leaves (sent or removed) lets its bytes go.
-  const attached = new AttachedFiles((entry) => { previews.release(entry.key) })
+  const attached = new AttachedFiles((entry) => {
+    previews.release(entry.key)
+    folderJobs.get(entry.id)?.abort()
+    folderJobs.delete(entry.id)
+  })
   const registry = new RailRegistry<RailHandle>()
   const toast = createToast()
   ctx.effect(() => () => { toast.dispose() }, '@crosery/dsh-drop: toast')
@@ -336,6 +379,74 @@ export function apply(ctx: ClientContext): void {
   }
 
   /**
+   * Acquire dropped folders for one session, one folder at a time.
+   *
+   * Each folder shows up in the rail at once as `pending`, and a send waits
+   * for it. A folder the desktop app has a path for is ready immediately and
+   * only counted for its card; any other is walked and, unless a drag hint
+   * checks out, copied. A folder that fails says so and leaves the rest of
+   * the drop alone.
+   */
+  const stageFolders = async (
+    sessionId: string,
+    folders: readonly DroppedEntry<File, FileSystemEntry>[],
+    hints: readonly string[],
+  ): Promise<void> => {
+    const copy = messages()
+    const queued = folders.map((folder) => {
+      const name = folder.entry?.name ?? folder.file?.name ?? ''
+      const entry = attached.add(sessionId, { kind: 'directory', status: 'pending', name })
+      const job = new AbortController()
+      folderJobs.set(entry.id, job)
+      return { folder, name, entry, job }
+    })
+    for (const { folder, name, entry, job } of queued) {
+      if (aborter.signal.aborted) return
+      if (job.signal.aborted) continue
+      const { signal, release } = linked(aborter.signal, job.signal)
+      const root = folder.entry as unknown as EntryLike<File> | undefined
+      try {
+        if (folder.path !== undefined && mentionFor(folder.path, 'directory') !== undefined) {
+          attached.update(sessionId, entry.id, { status: 'ready', path: folder.path, how: 'in-place' })
+          if (root !== undefined) {
+            const counted = await countFolder(root, signal)
+            attached.update(sessionId, entry.id, counted)
+          }
+          continue
+        }
+        if (root === undefined) throw new Error('the browser gave no folder entry')
+        const outcome = await acquireFolder(root, name, hints, signal, (progress) => {
+          attached.update(sessionId, entry.id, { progress })
+        })
+        if (!outcome.ok) {
+          attached.remove(sessionId, entry.id)
+          notify(sessionId, 'error', outcome.reason === 'empty'
+            ? copy.folderEmpty(name)
+            : copy.folderOverLimit(name, outcome.limit, outcome.limits))
+          continue
+        }
+        if (mentionFor(outcome.path, 'directory') === undefined) throw new Error('folder path cannot be referenced')
+        attached.update(sessionId, entry.id, {
+          status: 'ready', path: outcome.path, how: outcome.how,
+          summary: outcome.summary, listing: outcome.listing, progress: undefined,
+        })
+      } catch (error) {
+        // Removed by the user, or the plugin is going: nothing to report.
+        if (signal.aborted) continue
+        console.warn('[dsh-drop] could not acquire a folder', error)
+        // A folder already referenced in place stays; only its count failed.
+        if (attached.list(sessionId).some((one) => one.id === entry.id && one.status === 'pending')) {
+          attached.remove(sessionId, entry.id)
+          notify(sessionId, 'error', copy.folderFailed(name))
+        }
+      } finally {
+        release()
+        folderJobs.delete(entry.id)
+      }
+    }
+  }
+
+  /**
    * The shared tail of both gestures: route, split, hand over, acquire.
    * @param transfer - the drop or paste DataTransfer, still valid.
    * @param route - the composer it belongs to.
@@ -355,9 +466,11 @@ export function apply(ctx: ClientContext): void {
       notify(rail.sessionId, 'error', rail.sessionId === undefined ? copy.noSession : copy.blocked)
       return
     }
+    // Each part of a mixed drop goes its own way, and one refused item never
+    // takes the others down with it.
     if (plan.images.length > 0) rail.addFiles(plan.images)
-    if (plan.folders.length > 0) notify(rail.sessionId, 'info', copy.directories)
     if (plan.staged.length > 0) void stageAll(rail.sessionId, plan.staged, hints)
+    if (plan.folders.length > 0) void stageFolders(rail.sessionId, plan.folders, hints)
   }
 
   let watchdog: ReturnType<typeof setTimeout> | undefined
@@ -479,6 +592,7 @@ export function apply(ctx: ClientContext): void {
     window.addEventListener('dragend', reset)
     return () => {
       aborter.abort()
+      folderJobs.clear()
       document.removeEventListener('dragenter', onDragEnter, true)
       document.removeEventListener('dragover', onDragOver, true)
       document.removeEventListener('dragleave', onDragLeave, true)

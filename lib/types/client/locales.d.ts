@@ -18,7 +18,7 @@
  */
 export declare const DROP_NS = "crosery.drop";
 /** Dictionary key domain of this plugin's namespace. */
-export type DropKey = 'rail.label' | 'kind.image' | 'kind.video' | 'kind.audio' | 'kind.pdf' | 'kind.document' | 'kind.text' | 'kind.archive' | 'kind.file' | 'action.remove' | 'action.open' | 'action.close' | 'action.openTab' | 'action.scrollLeft' | 'action.scrollRight' | 'action.retry' | 'state.noPreview' | 'state.reloaded' | 'state.binary' | 'state.staging' | 'state.uploading' | 'state.failed' | 'state.inPlace' | 'state.copied' | 'media.noVideo' | 'media.noAudio';
+export type DropKey = 'rail.label' | 'kind.image' | 'kind.video' | 'kind.audio' | 'kind.pdf' | 'kind.document' | 'kind.text' | 'kind.archive' | 'kind.file' | 'kind.folder' | 'action.remove' | 'action.open' | 'action.close' | 'action.openTab' | 'action.scrollLeft' | 'action.scrollRight' | 'action.retry' | 'state.noPreview' | 'state.reloaded' | 'state.binary' | 'state.staging' | 'state.uploading' | 'state.failed' | 'state.inPlace' | 'state.copied' | 'state.scanning' | 'state.uploadingFiles' | 'meta.oneFile' | 'meta.files' | 'meta.filesAtLeast' | 'meta.ignored' | 'meta.unreadable' | 'listing.more' | 'listing.empty' | 'listing.counting' | 'media.noVideo' | 'media.noAudio';
 /** Simplified Chinese copy. */
 export declare const zh: Record<DropKey, string>;
 declare module '@deepseek-ai/dsh-client-ui-slots' {

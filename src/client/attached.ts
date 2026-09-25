@@ -20,8 +20,22 @@
  * @module @crosery/dsh-drop/client/attached
  */
 
+import type { FolderSummary } from '../contract.ts'
+
 /** What one staged reference names. Directories are spelled with a trailing slash. */
 export type AttachedKind = 'file' | 'directory'
+
+/** A folder copy's progress, per file. */
+export interface AttachedProgress {
+  /** Files uploaded. */
+  readonly done: number
+  /** Files to upload. */
+  readonly total: number
+  /** Bytes uploaded. */
+  readonly bytes: number
+  /** Bytes to upload. */
+  readonly totalBytes: number
+}
 
 /** Where an entry is in its acquisition. */
 export type AttachedStatus = 'pending' | 'ready' | 'error'
@@ -45,13 +59,19 @@ export interface AttachedFile {
   readonly path?: string | undefined
   /** How the path was obtained; present once `ready`. */
   readonly how?: AttachedHow | undefined
+  /** For a folder: what it holds, once counted. */
+  readonly summary?: FolderSummary | undefined
+  /** For a folder: relative paths of its first files, for the listing. */
+  readonly listing?: readonly string[] | undefined
+  /** For a folder being copied: how far the upload is. */
+  readonly progress?: AttachedProgress | undefined
 }
 
 /** The fields a caller supplies when staging; identity and key are assigned here. */
 export type AttachedInput = Omit<AttachedFile, 'id' | 'key'>
 
 /** Mutable fields of an existing entry. */
-export type AttachedUpdate = Partial<Pick<AttachedFile, 'status' | 'path' | 'how' | 'size'>>
+export type AttachedUpdate = Partial<Pick<AttachedFile, 'status' | 'path' | 'how' | 'size' | 'summary' | 'listing' | 'progress'>>
 
 /** A subscribable, per-session list of staged files. */
 export class AttachedFiles {

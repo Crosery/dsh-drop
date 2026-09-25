@@ -47,15 +47,18 @@ import { fileNameOf, freshFiles } from '../contract.ts'
 import { dropKindOf, formatDropBytes, kindBadge, type DropKind } from '../preview.ts'
 import type { AttachedFile } from './attached.ts'
 import { composerFace, snapshotOf, type ActionsLike, type ComposerFace, type InputSnapshot, type ScopeLike } from './composer-face.ts'
-import { DropLightbox, usePreviewText } from './DropLightbox.tsx'
-import { ChevronLeftGlyph, ChevronRightGlyph, CloseGlyph, PlayGlyph, RetryGlyph } from './icons.tsx'
+import { DropLightbox, usePreviewText, type FolderListing } from './DropLightbox.tsx'
+import { ChevronLeftGlyph, ChevronRightGlyph, CloseGlyph, FolderGlyph, PlayGlyph, RetryGlyph } from './icons.tsx'
 import { DROP_NS, type DropKey } from './locales.ts'
 import type { DropAsset } from './preview-store.ts'
 import type { RailRecord } from './registry.ts'
 import { useRailOverflow } from './use-rail-overflow.ts'
 
+/** What a card shows: a file's medium, or a folder. */
+type RailKind = DropKind | 'folder'
+
 /** Locale key naming each medium, for the card's meta line. */
-const KIND_LABEL: Readonly<Record<DropKind, DropKey>> = {
+const KIND_LABEL: Readonly<Record<RailKind, DropKey>> = {
   image: 'kind.image',
   video: 'kind.video',
   audio: 'kind.audio',
@@ -64,10 +67,11 @@ const KIND_LABEL: Readonly<Record<DropKind, DropKey>> = {
   text: 'kind.text',
   archive: 'kind.archive',
   file: 'kind.file',
+  folder: 'kind.folder',
 }
 
 /** The kinds whose card is a thumbnail rather than an identity row. */
-const THUMBNAIL_KINDS: readonly DropKind[] = ['image', 'video']
+const THUMBNAIL_KINDS: readonly RailKind[] = ['image', 'video']
 
 /** The composer limits the seat publishes for its drop invitation. */
 export interface DropLimits {
@@ -245,7 +249,7 @@ type RailItem =
     key: string
     entry: AttachedFile
     name: string
-    kind: DropKind
+    kind: RailKind
     asset: DropAsset | undefined
     remove: () => void
   }
@@ -269,6 +273,46 @@ function Glyph({ name }: { name: string }): ReactNode {
 }
 
 /**
+ * A folder card's leading glyph.
+ * @returns the glyph element.
+ */
+function FolderIcon(): ReactNode {
+  return (
+    <span className="dshdrop-glyph" data-folder="" aria-hidden="true">
+      <FolderGlyph size={26} />
+    </span>
+  )
+}
+
+/**
+ * The counts part of a folder card's meta line.
+ * @param entry - the folder's staged entry.
+ * @param t - the translator.
+ * @returns the parts, in reading order.
+ */
+function folderMeta(entry: AttachedFile, t: DropRailProps['t']): string[] {
+  const summary = entry.summary
+  if (entry.status === 'pending') {
+    const progress = entry.progress
+    if (progress === undefined) return [t('state.scanning')]
+    return [
+      t('state.uploadingFiles', { done: String(progress.done), total: String(progress.total) }),
+      formatDropBytes(progress.totalBytes),
+    ]
+  }
+  if (summary === undefined) return []
+  const parts = [
+    summary.truncated
+      ? t('meta.filesAtLeast', { count: String(summary.files) })
+      : summary.files === 1 ? t('meta.oneFile') : t('meta.files', { count: String(summary.files) }),
+    formatDropBytes(summary.bytes),
+  ]
+  if (summary.ignored > 0) parts.push(t('meta.ignored', { count: String(summary.ignored) }))
+  if (summary.unreadable > 0) parts.push(t('meta.unreadable', { count: String(summary.unreadable) }))
+  return parts
+}
+
+/**
  * The status part of a card's meta line.
  * @param item - the card's item.
  * @param t - the translator.
@@ -276,7 +320,8 @@ function Glyph({ name }: { name: string }): ReactNode {
  */
 function statusOf(item: RailItem, t: DropRailProps['t']): string {
   if (item.row === 'staged') {
-    if (item.entry.status === 'pending') return t('state.staging')
+    // A pending folder says how far it is in its counts instead.
+    if (item.entry.status === 'pending') return item.kind === 'folder' ? '' : t('state.staging')
     if (item.entry.how === 'in-place') return t('state.inPlace')
     if (item.entry.how === 'copied') return t('state.copied')
     return ''
@@ -305,16 +350,27 @@ function Card({ item, url, onOpen, t }: {
   t: DropRailProps['t']
 }): ReactNode {
   const size = item.row === 'seat' ? item.size : item.entry.size ?? item.asset?.size ?? 0
-  const sizeText = formatDropBytes(size)
+  const folder = item.row === 'staged' && item.kind === 'folder'
   const thumbnail = THUMBNAIL_KINDS.includes(item.kind) && url !== undefined
   const status = statusOf(item, t)
   const busy = item.row === 'staged' ? item.entry.status === 'pending' : item.upload?.status === 'uploading'
   const failed = item.row === 'seat' && item.upload?.status === 'error'
-  const title = item.row === 'staged' && item.entry.path !== undefined ? item.entry.path : item.name
-  const meta = [t(KIND_LABEL[item.kind]), sizeText, status].filter((part) => part !== '').join(' · ')
+  const counts = folder ? folderMeta(item.entry, t) : [formatDropBytes(size)]
+  const meta = [t(KIND_LABEL[item.kind]), ...counts, status].filter((part) => part !== '').join(' · ')
+  const path = item.row === 'staged' ? item.entry.path : undefined
+  // A folder's meta line is the longest, and the card clips it; the tooltip
+  // keeps all of it.
+  const title = folder ? [path ?? item.name, meta].join('\n') : path ?? item.name
+  // A folder reads as one: its name carries the separator a mention gives it.
+  const label = folder ? `${item.name}/` : item.name
 
   return (
-    <div className="dshdrop-item" data-state={failed ? 'error' : busy ? 'busy' : undefined} aria-busy={busy || undefined}>
+    <div
+      className="dshdrop-item"
+      data-state={failed ? 'error' : busy ? 'busy' : undefined}
+      data-kind={folder ? 'folder' : undefined}
+      aria-busy={busy || undefined}
+    >
       {thumbnail
         ? (
           <button
@@ -340,13 +396,13 @@ function Card({ item, url, onOpen, t }: {
           <button
             type="button"
             className="dshdrop-doc"
-            aria-label={t('action.open', { name: item.name })}
+            aria-label={t('action.open', { name: label })}
             title={title}
             onClick={onOpen}
           >
-            <Glyph name={item.name} />
+            {folder ? <FolderIcon /> : <Glyph name={item.name} />}
             <span className="dshdrop-lines">
-              <span className="dshdrop-name">{item.name}</span>
+              <span className="dshdrop-name">{label}</span>
               <span className="dshdrop-meta">{meta}</span>
             </span>
           </button>
@@ -365,13 +421,24 @@ function Card({ item, url, onOpen, t }: {
       <button
         type="button"
         className="dshdrop-remove"
-        aria-label={t('action.remove', { name: item.name })}
+        aria-label={t('action.remove', { name: label })}
         onClick={item.remove}
       >
         <CloseGlyph size={10} />
       </button>
     </div>
   )
+}
+
+/**
+ * A folder entry's listing for the preview dialog.
+ * @param entry - the folder's staged entry.
+ * @returns the paths and how many files went unlisted, or undefined while unknown.
+ */
+function listingFor(entry: AttachedFile): FolderListing | undefined {
+  if (entry.listing === undefined || entry.summary === undefined) return undefined
+  const more = Math.max(0, entry.summary.files - entry.listing.length)
+  return { paths: entry.listing, more, atLeast: entry.summary.truncated }
 }
 
 /**
@@ -510,7 +577,7 @@ export function DropRail(props: DropRailProps): ReactNode {
         // The name the user dropped: a copy may have been suffixed on disk
         // (`notes-2.md`), and the card's tooltip carries the real path.
         name: entry.name === '' && entry.path !== undefined ? fileNameOf(entry.path) : entry.name,
-        kind: asset?.kind ?? dropKindOf(entry.name, ''),
+        kind: entry.kind === 'directory' ? 'folder' : asset?.kind ?? dropKindOf(entry.name, ''),
         asset,
         // Drafts and staged files are held by different owners; a card only
         // knows it has a remove verb.
@@ -542,6 +609,10 @@ export function DropRail(props: DropRailProps): ReactNode {
   if (items.length === 0) return anchor
 
   const previewAsset = (item: RailItem): DropAsset | undefined => {
+    if (item.row === 'staged' && item.kind === 'folder') {
+      // No bytes behind a folder; the dialog's header reads its total size.
+      return { name: item.name, mediaType: '', size: item.entry.summary?.bytes ?? 0, kind: 'file', url: undefined }
+    }
     if (item.row === 'staged') return item.asset
     if (item.assetKey !== undefined) return assetOf(item.assetKey)
     // A draft image's preview URL belongs to the composer, not to this plugin,
@@ -585,9 +656,11 @@ export function DropRail(props: DropRailProps): ReactNode {
       )}
       {previewed !== null && (
         <DropLightbox
-          name={previewed.name}
+          name={previewed.row === 'staged' && previewed.kind === 'folder' ? `${previewed.name}/` : previewed.name}
           asset={previewAsset(previewed)}
           text={previewText}
+          folder={previewed.row === 'staged' && previewed.kind === 'folder'}
+          listing={previewed.row === 'staged' && previewed.kind === 'folder' ? listingFor(previewed.entry) : undefined}
           onClose={() => { setOpen(null) }}
           t={t}
         />

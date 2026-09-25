@@ -9,17 +9,24 @@
  * @module @crosery/dsh-drop/client/messages
  */
 
+import { formatDropBytes } from '../preview.ts'
+import type { FolderLimit, FolderLimits } from '../contract.ts'
+
 /** The message set one locale supplies. */
 export interface Messages {
   /** Some files could not be staged; the rest were. */
   failed: (count: number) => string
-  /** Directories were part of the drop and were skipped. */
-  directories: string
+  /** A folder crossed a copy limit and was not added. */
+  folderOverLimit: (name: string, limit: FolderLimit, limits: FolderLimits) => string
+  /** A folder held nothing that could be sent. */
+  folderEmpty: (name: string) => string
+  /** A folder could not be added for another reason. */
+  folderFailed: (name: string) => string
   /** No session is open, so there is nothing to hold the files against. */
   noSession: string
   /** The composer under the drop is not taking files right now. */
   blocked: string
-  /** A send was held back while files are still being prepared. */
+  /** A send was held back while attachments are still uploading. */
   waiting: (count: number) => string
   /** The staged mentions could not be added to the outgoing message. */
   attachFailed: string
@@ -37,15 +44,36 @@ export interface Messages {
   overlayBusy: string
 }
 
+/** What each limit is called in a notice, with the configured value. */
+const zhLimit = (limit: FolderLimit, limits: FolderLimits): string => {
+  switch (limit) {
+    case 'files': return `文件数超过 ${limits.maxFiles} 个（folderMaxFiles）`
+    case 'bytes': return `总大小超过 ${formatDropBytes(limits.maxBytes)}（folderMaxBytes）`
+    case 'file-bytes': return `其中有文件超过 ${formatDropBytes(limits.maxFileBytes)}（maxBytes）`
+    case 'depth': return `层级深于 ${limits.maxDepth} 层（folderMaxDepth）`
+  }
+}
+
+const enLimit = (limit: FolderLimit, limits: FolderLimits): string => {
+  switch (limit) {
+    case 'files': return `it holds more than ${limits.maxFiles} files (folderMaxFiles)`
+    case 'bytes': return `it is larger than ${formatDropBytes(limits.maxBytes)} in total (folderMaxBytes)`
+    case 'file-bytes': return `a file in it is larger than ${formatDropBytes(limits.maxFileBytes)} (maxBytes)`
+    case 'depth': return `it nests deeper than ${limits.maxDepth} levels (folderMaxDepth)`
+  }
+}
+
 const zh: Messages = {
   failed: (count) => count === 1 ? '有 1 个文件未能添加，请重试' : `有 ${count} 个文件未能添加，请重试`,
-  directories: '暂不支持文件夹，已跳过',
+  folderOverLimit: (name, limit, limits) => `文件夹“${name}”未添加：${zhLimit(limit, limits)}`,
+  folderEmpty: (name) => `文件夹“${name}”里没有可发送的文件`,
+  folderFailed: (name) => `文件夹“${name}”未能添加，请重试`,
   noSession: '请先打开一个会话再拖入文件',
   blocked: '当前输入框暂不接收文件',
-  waiting: (count) => count === 1 ? '还有 1 个文件在准备中，请稍候再发送' : `还有 ${count} 个文件在准备中，请稍候再发送`,
+  waiting: (count) => `还有 ${count} 个附件在上传，请等上传完成再发送`,
   attachFailed: '未能把附件加入这条消息，请重试',
   overlayTitle: '拖入文件',
-  overlayDesc: '图片作为附件发送，其他文件在发送时附上 @ 路径',
+  overlayDesc: '图片作为附件发送，其他文件和文件夹在发送时附上 @ 路径',
   overlayLimits: (count, size) => `图片最多 ${count} 张，每张不超过 ${size}`,
   overlayBlockedTitle: '无法在这里添加文件',
   overlayNoSession: '请先打开一个会话',
@@ -54,13 +82,17 @@ const zh: Messages = {
 
 const en: Messages = {
   failed: (count) => count === 1 ? 'Could not add 1 file; try again' : `Could not add ${count} files; try again`,
-  directories: 'Folders are not supported yet and were skipped',
+  folderOverLimit: (name, limit, limits) => `Folder “${name}” was not added: ${enLimit(limit, limits)}`,
+  folderEmpty: (name) => `Folder “${name}” has no files that can be sent`,
+  folderFailed: (name) => `Could not add folder “${name}”; try again`,
   noSession: 'Open a session before dropping files',
   blocked: 'This composer is not taking files right now',
-  waiting: (count) => count === 1 ? '1 file is still being prepared; send again in a moment' : `${count} files are still being prepared; send again in a moment`,
+  waiting: (count) => count === 1
+    ? 'Waiting for 1 upload to finish; send again when it is done'
+    : `Waiting for ${count} uploads to finish; send again when they are done`,
   attachFailed: 'Could not add the attachments to this message; try again',
   overlayTitle: 'Drop files here',
-  overlayDesc: 'Images attach as images; other files are sent as @ paths',
+  overlayDesc: 'Images attach as images; other files and folders are sent as @ paths',
   overlayLimits: (count, size) => `Up to ${count} images, ${size} each`,
   overlayBlockedTitle: 'Files cannot be added here',
   overlayNoSession: 'Open a session first',

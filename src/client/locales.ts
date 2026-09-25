@@ -23,12 +23,15 @@ export const DROP_NS = 'crosery.drop'
 export type DropKey =
   | 'rail.label'
   | 'kind.image' | 'kind.video' | 'kind.audio' | 'kind.pdf'
-  | 'kind.document' | 'kind.text' | 'kind.archive' | 'kind.file'
+  | 'kind.document' | 'kind.text' | 'kind.archive' | 'kind.file' | 'kind.folder'
   | 'action.remove' | 'action.open' | 'action.close' | 'action.openTab'
   | 'action.scrollLeft' | 'action.scrollRight' | 'action.retry'
   | 'state.noPreview' | 'state.reloaded' | 'state.binary'
   | 'state.staging' | 'state.uploading' | 'state.failed'
   | 'state.inPlace' | 'state.copied'
+  | 'state.scanning' | 'state.uploadingFiles'
+  | 'meta.oneFile' | 'meta.files' | 'meta.filesAtLeast' | 'meta.ignored' | 'meta.unreadable'
+  | 'listing.more' | 'listing.empty' | 'listing.counting'
   | 'media.noVideo' | 'media.noAudio'
 
 /** Simplified Chinese copy. */
@@ -42,6 +45,7 @@ export const zh: Record<DropKey, string> = {
   'kind.text': '文本',
   'kind.archive': '压缩包',
   'kind.file': '文件',
+  'kind.folder': '文件夹',
   'action.remove': '移除 {name}',
   'action.open': '预览 {name}',
   'action.close': '关闭预览',
@@ -57,6 +61,16 @@ export const zh: Record<DropKey, string> = {
   'state.failed': '上传失败',
   'state.inPlace': '引用原文件',
   'state.copied': '已复制副本',
+  'state.scanning': '读取中…',
+  'state.uploadingFiles': '上传中 {done}/{total}',
+  'meta.oneFile': '1 个文件',
+  'meta.files': '{count} 个文件',
+  'meta.filesAtLeast': '{count}+ 个文件',
+  'meta.ignored': '忽略 {count} 项',
+  'meta.unreadable': '{count} 项无法读取',
+  'listing.more': '……另有 {count} 个文件未列出',
+  'listing.empty': '没有可列出的文件',
+  'listing.counting': '正在读取文件列表…',
   'media.noVideo': '当前浏览器无法播放该视频格式',
   'media.noAudio': '当前浏览器无法播放该音频格式',
 }
@@ -79,6 +93,7 @@ export const en: Record<DropKey, string> = {
   'kind.text': 'Text',
   'kind.archive': 'Archive',
   'kind.file': 'File',
+  'kind.folder': 'Folder',
   'action.remove': 'Remove {name}',
   'action.open': 'Preview {name}',
   'action.close': 'Close preview',
@@ -94,6 +109,16 @@ export const en: Record<DropKey, string> = {
   'state.failed': 'Upload failed',
   'state.inPlace': 'Referenced in place',
   'state.copied': 'Copied',
+  'state.scanning': 'Reading…',
+  'state.uploadingFiles': 'Uploading {done}/{total}',
+  'meta.oneFile': '1 file',
+  'meta.files': '{count} files',
+  'meta.filesAtLeast': '{count}+ files',
+  'meta.ignored': '{count} ignored',
+  'meta.unreadable': '{count} unreadable',
+  'listing.more': '… and {count} more files not listed',
+  'listing.empty': 'No files to list',
+  'listing.counting': 'Reading the file list…',
   'media.noVideo': 'This browser cannot play that video format',
   'media.noAudio': 'This browser cannot play that audio format',
 }

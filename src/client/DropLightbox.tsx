@@ -26,6 +26,16 @@ import { CloseGlyph } from './icons.tsx'
 import type { DropAsset } from './preview-store.ts'
 import { DROP_NS } from './locales.ts'
 
+/** What a folder's preview lists. */
+export interface FolderListing {
+  /** Relative paths of its first files. */
+  readonly paths: readonly string[]
+  /** Files counted but not listed. */
+  readonly more: number
+  /** Whether the count itself stopped short, so `more` is a lower bound. */
+  readonly atLeast: boolean
+}
+
 /** Props of the expanded preview. */
 export interface DropLightboxProps {
   /** Display name shown in the header and used as the dialog's accessible name. */
@@ -34,6 +44,10 @@ export interface DropLightboxProps {
   asset: DropAsset | undefined
   /** Decoded text for the `text` kind; undefined while loading or unavailable. */
   text: string | undefined
+  /** Whether the item is a folder, which shows a listing instead of a stage. */
+  folder?: boolean | undefined
+  /** A folder's listing; undefined while it is still being read. */
+  listing?: FolderListing | undefined
   /** Dismissal (Escape, mask press, close control). */
   onClose: () => void
   /** This plugin's namespace translator. */
@@ -87,11 +101,28 @@ function Stage({ asset, text, t }: Pick<DropLightboxProps, 'asset' | 'text' | 't
 }
 
 /**
- * Show one dropped file at full size.
- * @param props - name, asset, decoded text, dismissal, translator.
+ * A folder's listing: its first files' relative paths, as plain text.
+ *
+ * Paths come from the dropped tree, which the user did not necessarily
+ * write, so they are rendered as text nodes — never as links or markup.
+ * @param props - the listing, or undefined while it is being read.
+ * @returns the listing element.
+ */
+function Listing({ listing, t }: { listing: FolderListing | undefined, t: DropLightboxProps['t'] }): ReactNode {
+  if (listing === undefined) return <div className="dshdrop-stageEmpty">{t('listing.counting')}</div>
+  if (listing.paths.length === 0) return <div className="dshdrop-stageEmpty">{t('listing.empty')}</div>
+  const more = listing.more > 0 || listing.atLeast
+    ? `\n${t('listing.more', { count: `${listing.more}${listing.atLeast ? '+' : ''}` })}`
+    : ''
+  return <pre className="dshdrop-stageText" data-listing="">{listing.paths.join('\n')}{more}</pre>
+}
+
+/**
+ * Show one dropped file at full size, or one folder's listing.
+ * @param props - name, asset, decoded text, listing, dismissal, translator.
  * @returns the dialog, portalled to the document body.
  */
-export function DropLightbox({ name, asset, text, onClose, t }: DropLightboxProps): ReactPortal | null {
+export function DropLightbox({ name, asset, text, folder, listing, onClose, t }: DropLightboxProps): ReactPortal | null {
   const dialogRef = useRef<HTMLDivElement | null>(null)
   const closeRef = useRef<HTMLButtonElement | null>(null)
   const openerRef = useRef<HTMLElement | null>(null)
@@ -155,7 +186,9 @@ export function DropLightbox({ name, asset, text, onClose, t }: DropLightboxProp
         </button>
       </div>
       <div className="dshdrop-stage">
-        <Stage asset={asset} text={text} t={t} />
+        {folder === true
+          ? <Listing listing={listing} t={t} />
+          : <Stage asset={asset} text={text} t={t} />}
       </div>
     </div>,
     document.body,

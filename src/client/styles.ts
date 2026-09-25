@@ -121,6 +121,9 @@ const SHEET = `
   cursor: pointer;
 }
 .dshdrop-doc:hover { border-color: var(--dsw-alias-border-l2); }
+/* A folder's meta line carries counts as well as a size; it gets more room
+   before it clips (the tooltip and the listing keep all of it). */
+.dshdrop-item[data-kind="folder"] .dshdrop-doc { max-width: 320px; }
 /* Drawn as a page rather than given an icon: the extension IS the glyph, and
    a format badge stays legible at sizes where a bespoke pictogram would not. */
 .dshdrop-glyph {
@@ -135,6 +138,13 @@ const SHEET = `
   background: var(--dsw-alias-bg-base);
   color: var(--dsw-alias-label-tertiary);
 }
+/* A folder is drawn, not badged: no page outline and no folded corner. */
+.dshdrop-glyph[data-folder] {
+  border-color: transparent;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+}
+.dshdrop-glyph[data-folder]::before { display: none; }
 /* The folded corner, cut from the page's own top-right. */
 .dshdrop-glyph::before {
   content: "";

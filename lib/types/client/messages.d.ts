@@ -8,17 +8,22 @@
  * dictionaries.
  * @module @crosery/dsh-drop/client/messages
  */
+import type { FolderLimit, FolderLimits } from '../contract.ts';
 /** The message set one locale supplies. */
 export interface Messages {
     /** Some files could not be staged; the rest were. */
     failed: (count: number) => string;
-    /** Directories were part of the drop and were skipped. */
-    directories: string;
+    /** A folder crossed a copy limit and was not added. */
+    folderOverLimit: (name: string, limit: FolderLimit, limits: FolderLimits) => string;
+    /** A folder held nothing that could be sent. */
+    folderEmpty: (name: string) => string;
+    /** A folder could not be added for another reason. */
+    folderFailed: (name: string) => string;
     /** No session is open, so there is nothing to hold the files against. */
     noSession: string;
     /** The composer under the drop is not taking files right now. */
     blocked: string;
-    /** A send was held back while files are still being prepared. */
+    /** A send was held back while attachments are still uploading. */
     waiting: (count: number) => string;
     /** The staged mentions could not be added to the outgoing message. */
     attachFailed: string;

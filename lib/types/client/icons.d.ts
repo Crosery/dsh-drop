@@ -25,4 +25,6 @@ export declare function ChevronRightGlyph({ size }: GlyphProps): ReactNode;
 export declare function PlayGlyph({ size }: GlyphProps): ReactNode;
 /** A circular arrow, for retrying a failed upload. */
 export declare function RetryGlyph({ size }: GlyphProps): ReactNode;
+/** A folder, for a referenced folder's card. */
+export declare function FolderGlyph({ size }: GlyphProps): ReactNode;
 export {};
