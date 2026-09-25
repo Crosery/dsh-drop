@@ -39,7 +39,7 @@
  *   [--pnpm-version <v>]    pnpm `dsh plugin` drives (default: the desktop runtime's, else 11.7.0)
  *   [--timeout-ms <n>]      how long `dsh web` may take to announce its URL (default 240 s)
  *   [--install-timeout-ms <n>]  how long the plain `npm install` of the harness may take
- *                           before legacy peer mode is used instead (default 90 s)
+ *                           before legacy peer mode is used instead (default 120 s)
  *   [--graph released|today]  with --dsh: resolve the harness's floating
  *                           dependencies as of its release — before the next
  *                           @deepseek-ai/dsh was published (default) — or as
@@ -80,7 +80,7 @@ const { values } = parseArgs({
     'pnpm-version': { type: 'string' },
     'accept-risk': { type: 'boolean', default: false },
     'timeout-ms': { type: 'string', default: '240000' },
-    'install-timeout-ms': { type: 'string', default: '90000' },
+    'install-timeout-ms': { type: 'string', default: '120000' },
     graph: { type: 'string', default: 'released' },
     keep: { type: 'boolean', default: false },
   },
@@ -138,8 +138,9 @@ function sleep(ms, unref = false) {
 
 /**
  * Whether this harness gates raw Web routes with its own authentication:
- * `connection.requestRejection(req)`, from 0.1.7 (dsh-client-connection). The
- * plugin feature-detects the same service at request time.
+ * `connection.requestRejection(req)` in dsh-client-connection, which exists
+ * from 0.1.2-alpha.2. The plugin feature-detects the same service at request
+ * time.
  */
 function hasAdmissionCheck(from) {
   const lookup = createRequire(from)
@@ -164,6 +165,75 @@ function supersededAt(version) {
     .filter(([key, at]) => key !== 'created' && key !== 'modified' && at > own)
     .map(([, at]) => at)
     .sort()[0]
+}
+
+/** An empty project to install the harness into. */
+function freshProject(dir) {
+  rmSync(dir, { recursive: true, force: true })
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'harness', version: '0.0.0', private: true }))
+}
+
+/**
+ * A `--before` later than `before` when npm refused one of the train's own
+ * packages as not yet published then: a train can be published out of order —
+ * `@deepseek-ai/dsh@0.1.5-rc.3` went out seven hours before its
+ * `dsh-client-ui-sidebar-documentpreview@0.1.5-rc.3`, after the next harness.
+ */
+function laterCutoff(output, before) {
+  const match = /No matching version found for (\S+)@(\S+) with a date before/.exec(output)
+  if (match === null) return undefined
+  const [, name, range] = match
+  const at = JSON.parse(run('npm', ['view', name, 'time', '--json'], { allowFailure: true }).stdout || '{}')[range.replace(/^[\^~=v]+/, '')]
+  if (typeof at !== 'string' || at <= before) return undefined
+  return new Date(Date.parse(at) + 1000).toISOString()
+}
+
+/**
+ * Install `spec` into `dir` the way a user gets it, and say how.
+ *
+ * As released (`--graph released`, the default): `--before` the next harness
+ * publication, moved later if the train's own packages went out after it.
+ * Install scripts run, as for a user: 0.1.3's session store needs its native
+ * addon built. The plain peer graph first; early prereleases carry caret peers
+ * that pull a later prerelease of the same tuple, and npm then either answers
+ * ERESOLVE or — 0.1.1-rc.2 under npm 11 — takes minutes of CPU to settle.
+ * @deepseek-ai/dsh lists every package it composes as a dependency, so legacy
+ * peer mode plus the peers it leaves unmet, each at its declared range, is the
+ * same harness.
+ */
+function installHarness(spec, dir) {
+  let before
+  if (values.graph === 'released') before = supersededAt(values.dsh)
+  else if (values.graph !== 'today') fail('harness', `--graph must be released or today, not ${values.graph}`)
+  const common = () => ['install', '--prefix', dir, '--no-audit', '--no-fund', ...(before === undefined ? [] : ['--before', before])]
+  const describe = (how) => `npm install${before === undefined ? '' : ` --before ${before} (as released)`}${how}`
+  const limit = Number(values['install-timeout-ms'])
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    freshProject(dir)
+    const first = run('npm', [...common(), spec], { allowFailure: true, timeout: limit, killSignal: 'SIGKILL' })
+    if (first.status === 0) return describe('')
+    const output = `${first.stdout}${first.stderr}`
+    const later = before === undefined ? undefined : laterCutoff(output, before)
+    if (later !== undefined) { before = later; continue }
+    const settled = first.error?.code !== 'ETIMEDOUT' && first.signal === null
+    if (settled && !/ERESOLVE/.test(output)) fail('harness', `npm install ${spec} failed: ${mask(output.slice(-2000))}`)
+
+    freshProject(dir)
+    run('npm', [...common(), '--legacy-peer-deps', spec])
+    let added = 0
+    for (let round = 0; round < 8; round += 1) {
+      const unmet = unmetPeers(join(dir, 'node_modules'))
+      if (unmet.size === 0) break
+      added += unmet.size
+      run('npm', [...common(), '--legacy-peer-deps', ...[...unmet].map(([name, range]) => `${name}@${range}`)])
+    }
+    const left = unmetPeers(join(dir, 'node_modules'))
+    if (left.size > 0) fail('harness', `peers still unmet after legacy install: ${[...left.keys()].join(', ')}`)
+    return describe(` --legacy-peer-deps + ${added} unmet peers at their ranges (the peer graph ${settled ? 'hit ERESOLVE' : `did not settle within ${Math.round(limit / 1000)} s`})`)
+  }
+  fail('harness', `npm install ${spec} kept refusing its own packages as unpublished before ${before}`)
 }
 
 /** Required peers no installed package can resolve, as `name → first declared range`. */
@@ -215,46 +285,7 @@ try {
   } else {
     assert.ok(values.dsh, '--dsh <exact version> or --harness-dir is required')
     harnessRoot = join(work, 'harness')
-    mkdirSync(harnessRoot, { recursive: true })
-    writeFileSync(join(harnessRoot, 'package.json'), JSON.stringify({ name: 'harness', version: '0.0.0', private: true }))
-    const spec = `@deepseek-ai/dsh@${values.dsh}`
-    const common = ['install', '--prefix', harnessRoot, '--no-audit', '--no-fund', '--ignore-scripts']
-    let via = 'npm install'
-    if (values.graph === 'released') {
-      const before = supersededAt(values.dsh)
-      if (before !== undefined) {
-        common.push('--before', before)
-        via += ` --before ${before} (as released)`
-      }
-    } else if (values.graph !== 'today') {
-      fail('harness', `--graph must be released or today, not ${values.graph}`)
-    }
-    // The graph a user gets from `npm install`, first. Early prereleases carry
-    // caret peers that pull a later prerelease of the same tuple: npm either
-    // answers ERESOLVE or — 0.1.1-rc.2 under npm 11 — takes ten minutes of CPU
-    // to settle. @deepseek-ai/dsh lists every package it composes as a
-    // dependency, so legacy peer mode plus the peers it leaves unmet, each at
-    // its declared range, is the same harness in seconds.
-    const first = run('npm', [...common, spec], { allowFailure: true, timeout: Number(values['install-timeout-ms']), killSignal: 'SIGKILL' })
-    if (first.status !== 0) {
-      const settled = first.error?.code !== 'ETIMEDOUT' && first.signal === null
-      if (settled && !/ERESOLVE/.test(`${first.stdout}${first.stderr}`)) fail('harness', `npm install ${spec} failed: ${mask(`${first.stderr}`.slice(-2000))}`)
-      rmSync(join(harnessRoot, 'node_modules'), { recursive: true, force: true })
-      rmSync(join(harnessRoot, 'package-lock.json'), { force: true })
-      writeFileSync(join(harnessRoot, 'package.json'), JSON.stringify({ name: 'harness', version: '0.0.0', private: true }))
-      run('npm', [...common, '--legacy-peer-deps', spec])
-      let added = 0
-      for (let round = 0; round < 8; round += 1) {
-        const unmet = unmetPeers(join(harnessRoot, 'node_modules'))
-        if (unmet.size === 0) break
-        added += unmet.size
-        run('npm', [...common, '--legacy-peer-deps', ...[...unmet].map(([name, range]) => `${name}@${range}`)])
-      }
-      const left = unmetPeers(join(harnessRoot, 'node_modules'))
-      if (left.size > 0) fail('harness', `peers still unmet after legacy install: ${[...left.keys()].join(', ')}`)
-      via += ` --legacy-peer-deps + ${added} unmet peers at their ranges (the peer graph ${settled ? 'hit ERESOLVE' : `did not settle within ${Math.round(Number(values['install-timeout-ms']) / 1000)} s`})`
-    }
-    result.install = via
+    result.install = installHarness(`@deepseek-ai/dsh@${values.dsh}`, harnessRoot)
     dshBin = join(harnessRoot, 'node_modules/@deepseek-ai/dsh/lib/bin.js')
   }
   if (!existsSync(dshBin)) fail('harness', `no dsh entry at ${dshBin}`)
@@ -345,7 +376,8 @@ try {
   const index = first.status === 200 ? first : await fetch(base, { headers })
   if (index.status !== 200) fail('client-graph', `the index answered ${index.status} after the token exchange (${first.status})`)
   const html = await index.text()
-  const wire = /globalThis\["__DSH_BOOT__"\] = (.*?)<\/script>/s.exec(html)
+  // `globalThis["__DSH_BOOT__"] = …` from 0.1.1, `window.__DSH_BOOT__ = …` on 0.1.0.
+  const wire = /(?:globalThis\["__DSH_BOOT__"\]|window\.__DSH_BOOT__)\s*=\s*(.*?)<\/script>/s.exec(html)
   if (wire === null) fail('client-graph', 'the index carries no __DSH_BOOT__ graph')
   const graph = JSON.parse(wire[1])
   const entries = new Map(graph.entries.map((e) => [e.id, e]))
@@ -392,19 +424,19 @@ try {
   // Not fatal: the browser half is checked either way, so one run names every
   // broken stage.
   if (wrong.length > 0) stage('host-routes', 'failed', wrong)
-  else stage('host-routes', 'passed', `stage, resolve and batch mounted; ${gated ? "anonymous callers refused by the harness's login check (401)" : 'this train has no login check for plugin routes (pre-0.1.7): anonymous callers reach them'}; a staged copy landed in this home and resolved`)
+  else stage('host-routes', 'passed', `stage, resolve and batch mounted; ${gated ? "anonymous callers refused by the harness's login check (401)" : 'this train has no login check for plugin routes (before 0.1.2): anonymous callers reach them'}; a staged copy landed in this home and resolved`)
 
   // 8. Browser half: the served bundle, evaluated against the shell's own
   //    module table — the specifiers a client bundle may require without a
   //    graph row. Read from the served shell, never assumed: 0.1.1 answers 7,
   //    0.1.7 answers 9.
-  const assets = [...html.matchAll(/<(?:script|link)\b[^>]*?\b(?:src|href)="([^"]+\.js)"/g)].map((m) => m[1])
+  const assets = [...html.matchAll(/<(?:script|link)\b[^>]*?\b(?:src|href)="([^"]+\.js(?:\?[^"]*)?)"/g)].map((m) => m[1])
   let table
   for (const asset of assets) {
     const res = await fetch(new URL(asset, base), { headers })
     if (!res.ok) continue
     table = moduleTableOf(await res.text())
-    if (table !== undefined) { result.moduleTable = { asset: asset.replace(/^.*\//, ''), specifiers: table }; break }
+    if (table !== undefined) { result.moduleTable = { asset: asset.replace(/\?.*$/, '').replace(/^.*\//, ''), specifiers: table }; break }
   }
   if (table === undefined) fail('client-load', `no static module table found in the shell's scripts (${assets.join(', ') || 'none'}); smoke-boot.mjs needs to learn this train's shell`)
 
