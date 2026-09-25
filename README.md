@@ -41,9 +41,9 @@ Restart after removal too. [Source builds and release procedure](docs/releasing.
 | PDF | File reference | Browser PDF viewer, when available |
 | Markdown / code / logs / CSV / HTML | File reference | Escaped text, first 64 KiB; HTML is not executed |
 | Office / iWork / archives / unknown files | File reference | Filename, size and format badge; no in-page document renderer |
-| Folders | Skipped with a notice (folder support is planned) | No recursive upload |
+| Folders | One folder reference, `@/path/to/folder/`, referenced in place when a path is known, otherwise copied with its structure | Folder card with file count, size and skipped entries; the listing shows the first 200 relative paths as text |
 
-A non-image file becomes an **@path**, not a new model content block. The model must explicitly use a file tool to read it; a large log costs only a path until then. This plugin adds no model tool. It complements [DSH Viewer](https://github.com/Crosery/dsh-viewer), which displays files from the model back to you.
+A non-image file becomes an **@path**, not a new model content block. The model must explicitly use a file tool to read it; a large log costs only a path until then. A folder becomes one **@path/** with a trailing slash — from 0.1.5 the model's reference prompt says to list such a path; 0.1.1 calls every `@` a file, and the model finds out when it tries to read one. Images inside a folder travel with the folder, never as image attachments. This plugin adds no model tool. It complements [DSH Viewer](https://github.com/Crosery/dsh-viewer), which displays files from the model back to you.
 
 1. Drop or paste files into the page with a session open. A drop lands in the composer under the pointer, or in the conversation's composer when dropped elsewhere; a composer that is not taking files (a subagent's, one mid-send) says so instead. A mixed batch keeps images on the native image path.
 2. Inspect the shared rail. A card reads "Preparing…" until its path is ready; click it to preview; remove individual entries without changing your words. Dropping the same file twice adds it once.
@@ -59,23 +59,40 @@ A non-image file becomes an **@path**, not a new model content block. The model 
 
 Otherwise bytes stream into **$DSH_HOME/drops/YYYY-MM-DD/**. Completed copies publish without overwriting another drop, including concurrent uploads. Edits to a copied file do not update the original. For a dependable workspace reference, use the composer's @ completion. A remote agent must be able to read the Host path; this plugin does not synchronize files to remote workspaces.
 
+## Folders
+
+A dropped folder is one card and, when sent, one reference. It reaches the model the same two ways a file does:
+
+- **In place.** In the desktop app the page learns the folder's real path and references it where it lies: nothing is copied, and the model sees the whole folder, `.git` included. On the Web, a drag that carries a local `file://` hint for the folder is checked by the Host against the folder's first eight files (relative path, size and modification time; a folder with fewer files has to be described completely) before it is referenced in place.
+- **Copied.** Otherwise the page walks the folder and uploads it into **$DSH_HOME/drops/YYYY-MM-DD/<name>/**, keeping its structure. The copy appears under that name only once every file has arrived; a name already taken gets a suffix (`proj-2`). Names on the ignore list (`.git`, `node_modules`, `.DS_Store`, `Thumbs.db`, `__MACOSX`, `.svn`, `.hg`) are skipped, and they and any unreadable file are counted on the card. Empty subfolders are not recreated.
+
+A folder over a copy limit — file count, total size, one file over `maxBytes`, or nesting depth — is **refused whole with a notice naming the limit**, never sent in part. While a folder is still being read or uploaded, its card shows progress and a send is held back with a "waiting for uploads" notice. Removing the card cancels the upload, and the Host deletes what had arrived. In a mixed drop each item goes its own way: one refused folder does not stop the files and images beside it.
+
 ## Configuration
 
 On **0.1.0–0.1.6**: namespace **crosery-drop** in $DSH_HOME/settings.yaml; changes apply live.
 
-On **0.1.7**: settings.yaml is gone. Set the values on the plugin's profile entry, id `drop`, in the profile's `cordis.patch.yml` (restate the whole `config` block — a patch replaces a row's config). The 0.1.7 one-time import does **not** carry a `crosery-drop` section over: it looks for an entry named after the section, and this entry is `drop`; the old values stay in `settings.yaml.imported`. The 0.1.7 Settings page shows no form for these two fields.
+On **0.1.7**: settings.yaml is gone. Set the values on the plugin's profile entry, id `drop`, in the profile's `cordis.patch.yml` (restate the whole `config` block — a patch replaces a row's config). The 0.1.7 one-time import does **not** carry a `crosery-drop` section over: it looks for an entry named after the section, and this entry is `drop`; the old values stay in `settings.yaml.imported`. The 0.1.7 Settings page shows no form for these fields.
 
 | Key | Default | Meaning |
 | --- | ---: | --- |
-| maxBytes | 536870912 (512 MiB) | Maximum bytes per staged file; must be positive. |
+| maxBytes | 536870912 (512 MiB) | Maximum bytes per staged file, including each file of a copied folder; must be positive. |
 | keepDays | 30 | Retention by date directory; 0 disables pruning. |
+| folderMaxFiles | 2000 | Most files a copied folder may hold. |
+| folderMaxBytes | 536870912 (512 MiB) | Most bytes, in total, a copied folder may hold. |
+| folderMaxDepth | 32 | Deepest nesting, in levels below the folder, a copied folder may have. |
+| folderIgnore | `.git`, `node_modules`, `.DS_Store`, `Thumbs.db`, `__MACOSX`, `.svn`, `.hg` | Names skipped and counted when a folder is copied; exact match against each file or folder name. |
+
+The folder limits apply to copies only; a folder referenced in place has no size limit.
 
 Cleanup runs at activation and when retention changes. It deletes expired date-named directories, including manually added contents inside them; other names and loose files are untouched. Removing a card does **not** delete the staged copy.
 
 ## Important limits
 
 - **Unsent non-image entries are page-local. Refresh or plugin unload loses the pending references and previews.** Drop again before sending. Copies may still exist on disk; that does not restore the pending list.
-- There is no byte-level progress for copies and no aggregate disk quota. A send while a card still reads "Preparing…" is held back with a notice. Files that could not be staged are reported with a count.
+- There is no byte-level progress for single-file copies (a folder shows files done out of total) and no aggregate disk quota across drops. A send while a card is still preparing or uploading is held back with a notice. Files that could not be staged are reported with a count.
+- **A copied folder copies everything not on the ignore list, secrets such as `.env` included**, the same as dropping that file would. Symbolic links inside a folder follow the browser's reading of them; the Host never follows a link when it counts a folder in place.
+- Pasting a folder is best effort: browsers rarely expose one on the clipboard.
 - On the 0.1.2+ composer the references are appended to the message at the moment you send, and the composer's own Enter or Send delivers it — Cmd/Ctrl+Enter steer or queue, the upload check and slash commands behave as usual. If the composer refuses the send (its own uploads still running, for example) the references are taken back out and stay staged. Shift+Enter, IME composition and a highlighted completion menu are never taken as a send; the Stop control never carries files. On the 0.1.0–0.1.1 textarea composer the plugin rewrites the draft and submits itself, as before.
 - If a sent message fails later, the composer restores it with the references in its text for retry, rather than returning them to the rail. The plugin cannot create a generic file content block.
 - Preview bytes stay in memory while an attachment is in the rail and are released when it is sent or removed. A preview shows the bytes as they were dropped; the model reads the actual file. Browser media/HEIC/PDF support varies.
@@ -83,7 +100,7 @@ Cleanup runs at activation and when retention changes. It deletes expired date-n
 
 ## Security
 
-No third-party upload service, analytics, automatic execution or archive extraction. Staging is a Host write endpoint: names are reduced to one segment, size is bounded, simple cross-site POSTs are refused, and no CORS access is granted. On **0.1.7** both routes also require the harness's own login authentication (its connection check), so another local process without the login cookie is refused. **On earlier trains the routes have no authentication of their own**: keep DSH loopback-only or behind authenticated access; do not expose its host authority to untrusted users. Same-origin plugins can act with the page's authority.
+No third-party upload service, analytics, automatic execution or archive extraction. Staging is a Host write endpoint: names are reduced to one segment, size is bounded, simple cross-site POSTs are refused, and no CORS access is granted. A copied folder's relative paths are re-sanitized on the Host (no `.` or `..` segments, control characters stripped, Windows-reserved names replaced, byte budgets), written only inside that batch's private directory, and never over an existing path. On **0.1.7** all three routes also require the harness's own login authentication (its connection check), so another local process without the login cookie is refused. **On earlier trains the routes have no authentication of their own**: keep DSH loopback-only or behind authenticated access; do not expose its host authority to untrusted users. Same-origin plugins can act with the page's authority.
 
 SVG remains inside an image element, HTML is escaped text, and PDF blobs are forced to application/pdf. Preview UI does not offer top-level blob navigation. The default retention is not secure erasure. See [development and security boundaries](docs/development.md).
 
