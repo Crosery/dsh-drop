@@ -86,7 +86,8 @@ const { values } = parseArgs({
   },
 })
 const root = fileURLToPath(new URL('..', import.meta.url))
-const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
+/** The plugin under test: the checkout, or the manifest inside `--tarball`. */
+let pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
 const timeoutMs = Number(values['timeout-ms'])
 /** pnpm 10 answers `dsh plugin add` with ERR_PNPM_ADDING_TO_ROOT; the desktop runtime ships 11.7.0. */
 const DEFAULT_PNPM = '11.7.0'
@@ -321,6 +322,12 @@ try {
     tarball = join(work, packed.filename)
   }
   result.tarball = tarball.startsWith(work) ? 'packed from the checkout' : tarball
+  if (values.tarball !== undefined) {
+    // Another build of the plugin (an old release, say): name, version and
+    // inject list come from it, so an --accept-risk exemption names it.
+    pkg = JSON.parse(run('tar', ['-xzOf', tarball, 'package/package.json']).stdout)
+    result.plugin = `${pkg.name}@${pkg.version}`
+  }
 
   // 4. Install through the official command, so the version gate runs.
   if (values['accept-risk']) {
