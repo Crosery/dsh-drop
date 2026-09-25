@@ -23,7 +23,12 @@
  * worth of tokens until the model decides to read it. (Inside the desktop app
  * the browser half asks the app for the path first and needs neither route.)
  *
- * Both routes are raw `webServer` routes, which the harness does not
+ * A **folder** takes the same two roads. Its path, when the drag carries one,
+ * is checked by the files it contains; without one, the browser walks the
+ * folder and **batch** copies it with its structure — one private directory
+ * per folder, published whole under its own name on commit.
+ *
+ * All three are raw `webServer` routes, which the harness does not
  * authenticate by itself. From 0.1.7 each request is put through the Host's
  * own admission check (`connection.requestRejection`: its Host/Origin fence
  * and login-cookie authentication) before anything else; earlier trains have
@@ -33,13 +38,15 @@
 import type { Context } from '@deepseek-ai/cordis';
 import { type DropSettings } from './contract.ts';
 import { type RequestRejection } from './stage-route.ts';
-export { COMPOSER_IMAGE_MEDIA_TYPES, DROP_SETTINGS_NAMESPACE, MTIME_TOLERANCE_MS, RESOLVE_ROUTE, STAGE_DIR, STAGE_ROUTE, fileNameOf, isComposerImageType, isPrunableStageDir, mentionFor, pathFromFileUrl, safeStageName, stageCandidate, stageDayDir, uriListPaths, } from './contract.ts';
-export type { DropSettings, ResolveOk, ResolveRequest, StageErr, StageOk } from './contract.ts';
+export { BATCH_HEADER, BATCH_ROUTE, COMPOSER_IMAGE_MEDIA_TYPES, DEFAULT_FOLDER_IGNORE, DEFAULT_FOLDER_MAX_BYTES, DEFAULT_FOLDER_MAX_DEPTH, DEFAULT_FOLDER_MAX_FILES, DROP_SETTINGS_NAMESPACE, FOLDER_SAMPLE_SIZE, MTIME_TOLERANCE_MS, RELPATH_HEADER, RESOLVE_ROUTE, STAGE_DIR, STAGE_ROUTE, fileNameOf, folderCandidate, folderLimitsOf, isComposerImageType, isIgnoredName, isPrunableStageDir, mentionFor, pathFromFileUrl, safeFolderName, safeRelativeSegments, safeStageName, stageCandidate, stageDayDir, uriListPaths, } from './contract.ts';
+export type { BatchAbortOk, BatchBeginOk, BatchCommitOk, BatchFileOk, BatchLimitsOk, BatchRequest, DropSettings, FolderLimit, FolderLimits, FolderSampleEntry, FolderSummary, ResolveOk, ResolveRequest, StageErr, StageOk, } from './contract.ts';
 export { DropSettingsSchema } from './settings.ts';
-export { crossSite, insideRoot, refused, requestedName, publishStage, stageHandler } from './stage-route.ts';
-export type { RequestRejection, StageOptions } from './stage-route.ts';
-export { claimMatches, readClaim, resolveHandler } from './resolve-route.ts';
-export type { ResolveOptions } from './resolve-route.ts';
+export { crossSite, declaresJson, insideRoot, refused, requestedName, publishStage, sendJson, stageHandler, } from './stage-route.ts';
+export type { BatchReceiver, RequestRejection, StageOptions } from './stage-route.ts';
+export { claimDirectory, claimMatches, readClaim, resolveHandler, summarizeDirectory } from './resolve-route.ts';
+export type { FolderRules, ResolveOptions } from './resolve-route.ts';
+export { batchStore, publishDirectory } from './folder-stage.ts';
+export type { BatchOptions, BatchStore } from './folder-stage.ts';
 export { pruneStage } from './prune.ts';
 /**
  * Settings namespace this plugin owns, as the settings service keys it.

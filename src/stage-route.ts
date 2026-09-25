@@ -24,7 +24,7 @@ import { randomUUID } from 'node:crypto'
 import { pipeline } from 'node:stream/promises'
 import { Transform } from 'node:stream'
 import {
-  NAME_HEADER, safeStageName, stageCandidate, stageDayDir,
+  BATCH_HEADER, NAME_HEADER, safeStageName, stageCandidate, stageDayDir,
   type StageErr, type StageOk,
 } from './contract.ts'
 
@@ -93,6 +93,37 @@ export function crossSite(req: IncomingMessage): boolean {
   return site !== undefined && site !== 'same-origin'
 }
 
+/**
+ * Whether a request body is declared as JSON.
+ *
+ * `application/json` is not a CORS-safelisted type, so a cross-site page can
+ * only send it after a preflight these routes never grant: requiring it keeps
+ * a no-cors form post from reaching the handler.
+ * @param req - the request.
+ * @returns true for an `application/json` body.
+ */
+export function declaresJson(req: IncomingMessage): boolean {
+  const type = req.headers['content-type']
+  return typeof type === 'string' && type.split(';')[0]!.trim().toLowerCase() === 'application/json'
+}
+
+/** The one value of a request header, when it was sent exactly once. */
+export function headerOf(req: IncomingMessage, name: string): string | undefined {
+  const raw = req.headers[name]
+  return typeof raw === 'string' ? raw : undefined
+}
+
+/** Where a file that belongs to a folder batch is handed. */
+export interface BatchReceiver {
+  /**
+   * Take one batch file's request, owning the full response.
+   * @param req - the upload.
+   * @param res - its response.
+   * @param id - the batch the request names.
+   */
+  receive(req: IncomingMessage, res: ServerResponse, id: string): Promise<void>
+}
+
 /** Runtime knobs the route reads fresh on every request. */
 export interface StageOptions {
   /** Absolute staging root; re-read per request so a settings edit takes effect live. */
@@ -103,6 +134,8 @@ export interface StageOptions {
   now?: () => number
   /** The Host's admission check, when the running harness has one. */
   reject?: RequestRejection | undefined
+  /** Folder batches; a request naming one is handed there. */
+  batches?: BatchReceiver | undefined
 }
 
 /**
@@ -111,7 +144,7 @@ export interface StageOptions {
  * @param status - HTTP status.
  * @param body - payload.
  */
-function json(res: ServerResponse, status: number, body: StageOk | StageErr): void {
+export function sendJson(res: ServerResponse, status: number, body: object): void {
   const payload = JSON.stringify(body)
   res.writeHead(status, {
     'content-type': 'application/json; charset=utf-8',
@@ -120,6 +153,11 @@ function json(res: ServerResponse, status: number, body: StageOk | StageErr): vo
     'x-content-type-options': 'nosniff',
   })
   res.end(payload)
+}
+
+/** {@link sendJson}, typed to this route's answers. */
+function json(res: ServerResponse, status: number, body: StageOk | StageErr): void {
+  sendJson(res, status, body)
 }
 
 /**
@@ -190,11 +228,23 @@ export function stageHandler(opts: StageOptions): (req: IncomingMessage, res: Se
       return
     }
 
-    // A browser simple/form POST cannot supply this non-safelisted header.
+    // A browser simple/form POST cannot supply these non-safelisted headers.
     // No CORS permission is granted; Fetch Metadata additionally rejects cross-origin calls.
-    if (typeof req.headers[NAME_HEADER] !== 'string' || crossSite(req)) {
+    const batch = headerOf(req, BATCH_HEADER)
+    if ((batch === undefined && typeof req.headers[NAME_HEADER] !== 'string') || crossSite(req)) {
       req.resume()
       json(res, 403, { error: 'forbidden' })
+      return
+    }
+
+    // One file of a folder: the batch owns where it goes and what it counts.
+    if (batch !== undefined) {
+      if (opts.batches === undefined) {
+        req.resume()
+        json(res, 404, { error: 'unknown-batch' })
+        return
+      }
+      await opts.batches.receive(req, res, batch)
       return
     }
 

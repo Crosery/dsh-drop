@@ -23,7 +23,12 @@
  * worth of tokens until the model decides to read it. (Inside the desktop app
  * the browser half asks the app for the path first and needs neither route.)
  *
- * Both routes are raw `webServer` routes, which the harness does not
+ * A **folder** takes the same two roads. Its path, when the drag carries one,
+ * is checked by the files it contains; without one, the browser walks the
+ * folder and **batch** copies it with its structure — one private directory
+ * per folder, published whole under its own name on commit.
+ *
+ * All three are raw `webServer` routes, which the harness does not
  * authenticate by itself. From 0.1.7 each request is put through the Host's
  * own admission check (`connection.requestRejection`: its Host/Origin fence
  * and login-cookie authentication) before anything else; earlier trains have
@@ -42,25 +47,36 @@ import type {} from '@deepseek-ai/dsh-settings'
 // Type-only: pulls the ctx.webServer merge without a value dependency.
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import {
-  DROP_SETTINGS_NAMESPACE, RESOLVE_ROUTE, STAGE_DIR, STAGE_ROUTE, type DropSettings,
+  BATCH_ROUTE, DROP_SETTINGS_NAMESPACE, RESOLVE_ROUTE, STAGE_DIR, STAGE_ROUTE, folderLimitsOf,
+  type DropSettings,
 } from './contract.ts'
 import { DropSettingsSchema } from './settings.ts'
 import { stageHandler, type RequestRejection } from './stage-route.ts'
 import { resolveHandler } from './resolve-route.ts'
+import { batchStore } from './folder-stage.ts'
 import { pruneStage } from './prune.ts'
 
 export {
-  COMPOSER_IMAGE_MEDIA_TYPES, DROP_SETTINGS_NAMESPACE, MTIME_TOLERANCE_MS,
-  RESOLVE_ROUTE, STAGE_DIR, STAGE_ROUTE,
-  fileNameOf, isComposerImageType, isPrunableStageDir, mentionFor,
-  pathFromFileUrl, safeStageName, stageCandidate, stageDayDir, uriListPaths,
+  BATCH_HEADER, BATCH_ROUTE, COMPOSER_IMAGE_MEDIA_TYPES, DEFAULT_FOLDER_IGNORE, DEFAULT_FOLDER_MAX_BYTES,
+  DEFAULT_FOLDER_MAX_DEPTH, DEFAULT_FOLDER_MAX_FILES, DROP_SETTINGS_NAMESPACE, FOLDER_SAMPLE_SIZE,
+  MTIME_TOLERANCE_MS, RELPATH_HEADER, RESOLVE_ROUTE, STAGE_DIR, STAGE_ROUTE,
+  fileNameOf, folderCandidate, folderLimitsOf, isComposerImageType, isIgnoredName, isPrunableStageDir,
+  mentionFor, pathFromFileUrl, safeFolderName, safeRelativeSegments, safeStageName, stageCandidate,
+  stageDayDir, uriListPaths,
 } from './contract.ts'
-export type { DropSettings, ResolveOk, ResolveRequest, StageErr, StageOk } from './contract.ts'
+export type {
+  BatchAbortOk, BatchBeginOk, BatchCommitOk, BatchFileOk, BatchLimitsOk, BatchRequest, DropSettings,
+  FolderLimit, FolderLimits, FolderSampleEntry, FolderSummary, ResolveOk, ResolveRequest, StageErr, StageOk,
+} from './contract.ts'
 export { DropSettingsSchema } from './settings.ts'
-export { crossSite, insideRoot, refused, requestedName, publishStage, stageHandler } from './stage-route.ts'
-export type { RequestRejection, StageOptions } from './stage-route.ts'
-export { claimMatches, readClaim, resolveHandler } from './resolve-route.ts'
-export type { ResolveOptions } from './resolve-route.ts'
+export {
+  crossSite, declaresJson, insideRoot, refused, requestedName, publishStage, sendJson, stageHandler,
+} from './stage-route.ts'
+export type { BatchReceiver, RequestRejection, StageOptions } from './stage-route.ts'
+export { claimDirectory, claimMatches, readClaim, resolveHandler, summarizeDirectory } from './resolve-route.ts'
+export type { FolderRules, ResolveOptions } from './resolve-route.ts'
+export { batchStore, publishDirectory } from './folder-stage.ts'
+export type { BatchOptions, BatchStore } from './folder-stage.ts'
 export { pruneStage } from './prune.ts'
 
 /**
@@ -236,6 +252,16 @@ export function apply(ctx: Context, config: Config): void {
   const reject = hostAdmission(ctx)
 
   ctx.inject(['webServer'], (scoped) => {
+    // Folder batches live as long as the routes that serve them: when the Web
+    // server goes, every batch still open is removed with it.
+    const batches = batchStore({
+      root: () => root,
+      limits: () => folderLimitsOf(source()),
+      sweepEveryMs: 60_000,
+      reject,
+    })
+    scoped.effect(() => () => { void batches.dispose() }, '@crosery/dsh-drop: folder batches')
+
     scoped.effect(() => scoped.webServer.register({
       kind: 'exact',
       path: STAGE_ROUTE,
@@ -243,16 +269,29 @@ export function apply(ctx: Context, config: Config): void {
         root: () => root,
         maxBytes: () => source().maxBytes,
         reject,
+        batches,
       }),
     }), '@crosery/dsh-drop: stage route')
 
+    scoped.effect(() => scoped.webServer.register({
+      kind: 'exact',
+      path: BATCH_ROUTE,
+      handler: batches.handler,
+    }), '@crosery/dsh-drop: batch route')
+
     // Registered beside staging rather than inside it: this one never writes.
     // It is what lets a drag that carried a real path reference the user's own
-    // file instead of a copy of it.
+    // file or folder instead of a copy of it.
     scoped.effect(() => scoped.webServer.register({
       kind: 'exact',
       path: RESOLVE_ROUTE,
-      handler: resolveHandler({ reject }),
+      handler: resolveHandler({
+        reject,
+        folder: () => {
+          const limits = folderLimitsOf(source())
+          return { ignore: limits.ignore, maxDepth: limits.maxDepth }
+        },
+      }),
     }), '@crosery/dsh-drop: resolve route')
   })
 
@@ -279,6 +318,11 @@ export function apply(ctx: Context, config: Config): void {
     // looking like a configured limit rather than a mistake.
     validate: (value) => {
       if (value.maxBytes < 1) throw new Error('crosery-drop.maxBytes must be at least 1 byte')
+      // The same trap per folder ceiling: zero would refuse every folder.
+      for (const field of ['folderMaxFiles', 'folderMaxBytes', 'folderMaxDepth'] as const) {
+        const limit = value[field]
+        if (limit !== undefined && limit < 1) throw new Error(`crosery-drop.${field} must be at least 1`)
+      }
     },
   })
 

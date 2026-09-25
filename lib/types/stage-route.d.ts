@@ -45,6 +45,28 @@ export declare function refused(reject: RequestRejection | undefined, req: Incom
  * @returns true when the browser declared a cross-origin caller.
  */
 export declare function crossSite(req: IncomingMessage): boolean;
+/**
+ * Whether a request body is declared as JSON.
+ *
+ * `application/json` is not a CORS-safelisted type, so a cross-site page can
+ * only send it after a preflight these routes never grant: requiring it keeps
+ * a no-cors form post from reaching the handler.
+ * @param req - the request.
+ * @returns true for an `application/json` body.
+ */
+export declare function declaresJson(req: IncomingMessage): boolean;
+/** The one value of a request header, when it was sent exactly once. */
+export declare function headerOf(req: IncomingMessage, name: string): string | undefined;
+/** Where a file that belongs to a folder batch is handed. */
+export interface BatchReceiver {
+    /**
+     * Take one batch file's request, owning the full response.
+     * @param req - the upload.
+     * @param res - its response.
+     * @param id - the batch the request names.
+     */
+    receive(req: IncomingMessage, res: ServerResponse, id: string): Promise<void>;
+}
 /** Runtime knobs the route reads fresh on every request. */
 export interface StageOptions {
     /** Absolute staging root; re-read per request so a settings edit takes effect live. */
@@ -55,7 +77,16 @@ export interface StageOptions {
     now?: () => number;
     /** The Host's admission check, when the running harness has one. */
     reject?: RequestRejection | undefined;
+    /** Folder batches; a request naming one is handed there. */
+    batches?: BatchReceiver | undefined;
 }
+/**
+ * Answer with a JSON body and no cache.
+ * @param res - the response.
+ * @param status - HTTP status.
+ * @param body - payload.
+ */
+export declare function sendJson(res: ServerResponse, status: number, body: object): void;
 /**
  * Read the file name the browser declared.
  *
