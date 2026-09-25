@@ -53,7 +53,7 @@ Host peer 对每个支持的元组各用一个带预发布标记的比较器：`
 | 0.1.2-alpha.2、alpha.3、alpha.4、alpha.5 | 通过 | — |
 | 0.1.2-rc.1 | 通过 | 通过；匿名调用得到 401 |
 | 0.1.3-alpha.2 | 通过 | 通过；401 |
-| 0.1.5-alpha.1、alpha.2、rc.1、rc.2 | 通过 | — |
+| 0.1.5-alpha.1、alpha.2、rc.1、rc.2 | 通过（legacy peer） | — |
 | 0.1.5-rc.3——npm `latest` | 通过（legacy peer） | 通过；401 |
 | 0.1.6-alpha.1 | 通过 | — |
 | 0.1.6-alpha.2 | 通过 | 通过；401 |

@@ -53,7 +53,7 @@ Produced on 2026-09-26 by `node scripts/sweep-trains.mjs` (every row: install, t
 | 0.1.2-alpha.2, alpha.3, alpha.4, alpha.5 | pass | — |
 | 0.1.2-rc.1 | pass | pass; anonymous callers get 401 |
 | 0.1.3-alpha.2 | pass | pass; 401 |
-| 0.1.5-alpha.1, alpha.2, rc.1, rc.2 | pass | — |
+| 0.1.5-alpha.1, alpha.2, rc.1, rc.2 | pass (legacy peers) | — |
 | 0.1.5-rc.3 — npm `latest` | pass (legacy peers) | pass; 401 |
 | 0.1.6-alpha.1 | pass | — |
 | 0.1.6-alpha.2 | pass | pass; 401 |
