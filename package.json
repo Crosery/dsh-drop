@@ -1,6 +1,6 @@
 {
   "name": "@crosery/dsh-drop",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "description": "Drag and paste files into dsh Web with a unified preview rail; keep native images and add file references only when sending.",
   "keywords": [
     "dsh",

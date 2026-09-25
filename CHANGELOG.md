@@ -2,6 +2,22 @@
 
 > **English** · [中文](CHANGELOG.zh.md)
 
+## 0.2.0
+
+DeepSeek Harness 0.1.7 — the desktop app's runtime and npm `next` — on the Web and in the desktop app.
+
+- **Loads on 0.1.7.** The peer ranges now admit every published train from 0.1.0-rc.8 through 0.1.7-rc.2, one prerelease comparator per tuple. From 0.1.7 the harness itself refuses to install, and silently skips at boot, a plugin whose ranges do not admit it: v0.1.3 stopped at `<0.1.6-0`, so on 0.1.7 it was simply absent. 0.1.8 is admitted only after a sweep verifies it.
+- **The rail no longer crashes on 0.1.7.** 0.1.7 renamed the primitive icons the rail imported (`IconCloseOutline16` and three others), so the first card rendered `undefined`. The rail draws its glyphs inline, and its bundle requires only React and React DOM.
+- **Desktop app.** Dropped files and folders are referenced where they lie, through the path the desktop app gives the page (`__DSH_HOST_PATHS__`); nothing is copied. Requests are document-relative, so they work from the app's `dsh-app://` page. Install it from **Plugins → Add plugin** with the release URL; the `dsh plugin` CLI refuses the desktop profile.
+- **Folder drag-and-drop.** A dropped folder is one rail card and, when sent, one `@/path/folder/` reference. It is referenced in place when its path is known (desktop, or a Web path hint the Host confirms against the folder's files), otherwise copied into `$DSH_HOME/drops/` with its structure through a new batch route, under file-count, size and depth limits (`folderMaxFiles`, `folderMaxBytes`, `folderMaxDepth`, `folderIgnore`). An over-limit folder is refused whole; removing a pending card cancels the upload and deletes what arrived.
+- **Send guard for the Lexical composer.** Since 0.1.2 the composer is a `contenteditable`, not a `<textarea>`, and Enter sent messages without their staged files. The guard now appends the references at the moment you send (`insertText` on 0.1.7, the scoped insert event on 0.1.2–0.1.6) and lets the composer's own Enter or Send deliver them; a refused send takes them back out. File-only messages send with Enter or the grey Send button. Shift+Enter, IME composition, a highlighted completion menu and Stop never carry files.
+- **Per-composer routing.** 0.1.7 removed the "current session" the drop handler read, so non-image drops were discarded. Each rail registers itself; a drop goes to the composer under the pointer, or the conversation's composer. A composer that is not taking files says so.
+- **Authenticated routes.** On 0.1.7 the stage, resolve and batch routes first ask the harness's own login check (`connection.requestRejection`); an unauthenticated local caller gets 401. Resolve gained the stage route's cross-site gate. Paths with C1 control characters are refused, as upstream's mention formatter does.
+- **The rail shows the composer's own file drafts** (the **+** picker) with upload progress, error and retry, honours `canAcceptDrop`, and adds the same file only once. Paste keeps genuine text and ignores pastes aimed at other plugins' fields.
+- **Settings on 0.1.7** are set on the `drop` entry in the profile's `cordis.patch.yml`; 0.1.7's one-time `settings.yaml` import does not carry the old `crosery-drop` section over.
+- **CI covers the desktop app and every published train.** Each cell — the pinned train, the 0.1.1-rc.2 floor, the version the desktop app's update feeds ship, npm `latest` / `next` / `alpha`, and a weekly sweep of every published version — runs types, tests, peer admission under both semver rules and a boot smoke: the packed plugin is installed with `dsh plugin add`, activates, answers on its routes and is served. A macOS job runs the same smoke on the desktop app's own runtime. Releases are gated on the pinned, floor and desktop cells, the desktop bytes and the full sweep. `check:dist` now checks the bundle's reads of harness modules against the export names the train really publishes.
+- Development pins move to the 0.1.7-rc.2 train with Cordis 4.0.4.
+
 ## 0.1.3
 
 - Fix the rail's `useMemo` dependency list: the image rows close over the resolved remove verb, so a train that supplies only `onRemoveAttachment` (0.1.2 and later, where `onRemoveImage` is always absent) could keep a stale handler across renders.
