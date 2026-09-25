@@ -10,8 +10,9 @@
  *
  * Object URLs are process-global and are not reclaimed by unmounting the
  * element that used them, so somebody has to own their lifetime. That owner is
- * this store: one URL per path, minted when the file is recorded, all of them
- * revoked when the plugin unloads.
+ * this store: one URL per key, minted when the file is recorded, revoked when
+ * the attachment it backs leaves (sent or removed), and all of them revoked
+ * when the plugin unloads.
  * @module @crosery/dsh-drop/client/preview-store
  */
 
@@ -38,11 +39,12 @@ export interface DropAsset {
 }
 
 /**
- * Per-path preview material for the files dropped in this page's lifetime.
+ * Per-attachment preview material for the files dropped in this page's
+ * lifetime.
  *
- * Keyed by path rather than by occurrence id: the path is what survives the
- * machine's occurrence churn, so deleting a chip and dropping the same file
- * again reuses the URL and the decoded text instead of paying for both twice.
+ * Keyed by an opaque key the caller chooses: a staged entry's own key, or a
+ * composer draft's id. A key names one attachment for as long as it is
+ * attached, and {@link release} lets its bytes go the moment it is not.
  */
 export class PreviewStore {
   private readonly assets = new Map<string, DropAsset>()
@@ -52,13 +54,12 @@ export class PreviewStore {
   private disposed = false
 
   /**
-   * Record one acquired file against the path it was referenced by.
+   * Record one file against the attachment key it backs.
    *
-   * Idempotent per path: a second drop of the same file keeps the first
-   * asset, so a card never flickers through a new object URL for identical
-   * bytes.
-   * @param path - the absolute path inserted into the draft.
-   * @param file - the dropped file that path stands for.
+   * Idempotent per key: a second put keeps the first asset, so a card never
+   * flickers through a new object URL for identical bytes.
+   * @param path - the attachment key.
+   * @param file - the dropped file that key stands for.
    */
   put(path: string, file: File): void {
     if (this.disposed || this.assets.has(path)) return
@@ -100,6 +101,21 @@ export class PreviewStore {
     const pending = this.decode(path)
     this.texts.set(path, pending)
     return pending
+  }
+
+  /**
+   * Let one attachment's preview material go: revoke its URL and drop its bytes.
+   * @param path - the attachment key.
+   */
+  release(path: string): void {
+    const asset = this.assets.get(path)
+    if (asset?.url !== undefined) {
+      URL.revokeObjectURL(asset.url)
+      this.urls.delete(asset.url)
+    }
+    this.assets.delete(path)
+    this.files.delete(path)
+    this.texts.delete(path)
   }
 
   /** Revoke every URL this store minted and drop its retained bytes. */

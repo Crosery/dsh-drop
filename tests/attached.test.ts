@@ -27,20 +27,68 @@ describe('AttachedFiles', () => {
     assert.deepEqual(files.list('s').map((f) => f.path), ['/a', '/b', '/c'])
   })
 
-  it('mints distinct ids even for the same path twice', () => {
+  it('stages one path once per session', () => {
+    // Dropping the same file twice used to make two cards and two mentions of
+    // one path; the second drop now answers the existing entry.
     const files = new AttachedFiles()
     const first = files.add('s', '/same.md')
     const second = files.add('s', '/same.md')
-    assert.notEqual(first.id, second.id)
-    assert.equal(files.list('s').length, 2)
+    assert.equal(second, first)
+    assert.equal(files.list('s').length, 1)
+    files.add('t', '/same.md')
+    assert.equal(files.list('t').length, 1, 'another session stages it separately')
   })
 
-  it('removes one entry by id and leaves its twin', () => {
+  it('removes one entry by id and leaves the others', () => {
     const files = new AttachedFiles()
-    const first = files.add('s', '/same.md')
-    files.add('s', '/same.md')
+    const first = files.add('s', '/one.md')
+    const second = files.add('s', '/two.md')
     files.remove('s', first.id)
-    assert.deepEqual(files.list('s').map((f) => f.id), [first.id + 1])
+    assert.deepEqual(files.list('s').map((f) => f.id), [second.id])
+  })
+
+  it('holds a pending entry until its path arrives, then dedupes by path', () => {
+    const files = new AttachedFiles()
+    const ready = files.add('s', '/a/report.pdf')
+    const pending = files.add('s', { kind: 'file', status: 'pending', name: 'report.pdf', size: 3 })
+    assert.equal(pending.status, 'pending')
+    assert.equal(pending.path, undefined)
+    assert.equal(files.list('s').length, 2, 'a pending entry is never merged: it has no path yet')
+    const settled = files.update('s', pending.id, { status: 'ready', path: '/a/report.pdf', how: 'in-place' })
+    assert.equal(settled, ready, 'becoming ready onto a staged path folds into the existing entry')
+    assert.deepEqual(files.list('s').map((f) => f.id), [ready.id])
+  })
+
+  it('updates a pending entry in place when its path is new', () => {
+    const files = new AttachedFiles()
+    const pending = files.add('s', { kind: 'file', status: 'pending', name: 'notes.md' })
+    const settled = files.update('s', pending.id, { status: 'ready', path: '/drops/notes.md', how: 'copied' })
+    assert.equal(settled?.id, pending.id)
+    assert.equal(settled?.key, pending.key, 'the preview key survives the update')
+    assert.deepEqual(files.withStatus('s', 'ready').map((f) => f.path), ['/drops/notes.md'])
+    assert.equal(files.update('s', 999, { status: 'ready' }), undefined)
+  })
+
+  it('clears only the entries a send carried out', () => {
+    // A file dropped while the send was being judged must survive the clear.
+    const files = new AttachedFiles()
+    const sent = files.add('s', '/sent.md')
+    const late = files.add('s', { kind: 'file', status: 'pending', name: 'late.md' })
+    files.clear('s', [sent.id])
+    assert.deepEqual(files.list('s').map((f) => f.id), [late.id])
+  })
+
+  it('reports every entry that leaves, once, so its preview can be released', () => {
+    const released: string[] = []
+    const files = new AttachedFiles((entry) => { released.push(entry.key) })
+    const a = files.add('s', '/a')
+    const b = files.add('s', '/b')
+    const c = files.add('s', '/c')
+    files.remove('s', a.id)
+    files.clear('s', [b.id])
+    files.clear('s')
+    files.clear('s')
+    assert.deepEqual(released, [a.key, b.key, c.key])
   })
 
   it('clears one session on send without touching another', () => {

@@ -49,42 +49,120 @@ export declare const COMPOSER_IMAGE_MEDIA_TYPES: readonly string[];
  */
 export declare function isComposerImageType(mediaType: string): boolean;
 /**
- * Whether this plugin claims a drag carrying these file media types.
+ * The parts of a `DataTransfer` the claim decision reads.
  *
- * Lives here rather than in the client entry so it is reachable from a test
- * that has no DOM: every drag decision this plugin makes is one call to this
- * function, and the client entry only supplies the types.
- * @param mediaTypes - browser-declared types of the drag's file members.
- * @returns true when at least one member is not a composer-acceptable image.
+ * Restated as plain values rather than read off the DOM class so the rule is
+ * reachable from a test with no DOM. During `dragover` the browser withholds
+ * names and bytes but still exposes `types` and each item's `kind`, which is
+ * exactly and only what this decision needs.
  */
-export declare function claimsFileTypes(mediaTypes: readonly string[]): boolean;
-/** One dropped entry: its file (absent when the browser withheld it) and whether it is a directory. */
-export interface DroppedEntry<F> {
-    file: F | null;
-    isDirectory: boolean;
-}
-/** How one drop divides between the shipped image path and this plugin's. */
-export interface DropPlan<F> {
-    /** Files the shipped composer accepts as draft images. */
-    images: F[];
-    /** Files this plugin stages and references. */
-    staged: F[];
-    /** Whether any member was a directory. */
-    directories: boolean;
+export interface TransferShape {
+    /** `DataTransfer.types`. */
+    readonly types: readonly string[];
+    /** How many members have `kind === 'file'`. */
+    readonly fileItems: number;
+    /** `DataTransfer.files.length`; some browsers fill it but not `items`. */
+    readonly files: number;
 }
 /**
- * Split dropped entries into the two paths.
+ * Whether this plugin takes a transfer.
  *
- * Generic over the file rather than typed to `File` for the same reason
- * {@link claimsFileTypes} lives here: the only property this decision reads is
- * `type`, and depending on the DOM class for it would put the rule out of reach
- * of the test suite.
+ * Any transfer carrying a file is taken, images included: this plugin owns
+ * the composer's attachment seat, and the shipped entry's document listeners
+ * went with it, so nothing else would receive the drop. Images are then handed
+ * straight back to the composer's own intake, which keeps them on the native
+ * path. A drag of plain text or a link carries no file member and is left to
+ * the page.
+ * @param shape - the transfer's types and member counts.
+ * @returns true when the transfer carries at least one file.
+ */
+export declare function claimsTransfer(shape: TransferShape): boolean;
+/**
+ * One dropped entry, read while the transfer was still valid.
+ *
+ * `path` is the desktop app's answer for the file, when it has one; `entry`
+ * is the browser's directory handle, carried for folder handling. Both have
+ * to be read synchronously inside the event handler — the item list is
+ * neutered as soon as the handler yields.
+ */
+export interface DroppedEntry<F, E = unknown> {
+    file: F | null;
+    isDirectory: boolean;
+    /** Absolute path the host bridge reported; absent on the Web or for unbacked files. */
+    path?: string | undefined;
+    /** The browser's filesystem entry, kept for directories. */
+    entry?: E | undefined;
+}
+/** One file this plugin acquires and references, with any path known up front. */
+export interface StagedCandidate<F> {
+    file: F;
+    /** Absolute path from the desktop bridge; absent when only bytes arrived. */
+    path: string | undefined;
+}
+/** How one drop divides between the shipped image path and this plugin's. */
+export interface DropPlan<F, E = unknown> {
+    /** Files the shipped composer accepts as draft images. */
+    images: F[];
+    /** Files this plugin acquires and references. */
+    staged: StagedCandidate<F>[];
+    /**
+     * Directories in the drop, in drop order.
+     *
+     * Carried rather than counted so folder handling can take them from here;
+     * until it exists they are reported and skipped.
+     */
+    folders: DroppedEntry<F, E>[];
+}
+/**
+ * Split dropped entries into the paths each one takes.
+ *
+ * Generic over the file rather than typed to `File`: the only property this
+ * decision reads is `type`, and depending on the DOM class for it would put
+ * the rule out of reach of the test suite.
  * @param entries - entries read from the DataTransfer, in drop order.
  * @returns the plan.
  */
 export declare function planDrop<F extends {
     type: string;
-}>(entries: readonly DroppedEntry<F>[]): DropPlan<F>;
+}, E = unknown>(entries: readonly DroppedEntry<F, E>[]): DropPlan<F, E>;
+/** The identity two browser files share when they are, for every practical purpose, the same file. */
+export interface FileSignature {
+    readonly name: string;
+    readonly size: number;
+    readonly lastModified?: number | undefined;
+}
+/**
+ * Whether two files carry the same name, size and modification time.
+ *
+ * The composer has no stable file identity: dropping the same PNG twice makes
+ * two drafts. Name, byte length and mtime together are what the browser
+ * exposes, and a collision among them is far rarer than the accidental double
+ * drop this catches.
+ * @param a - one file.
+ * @param b - the other.
+ * @returns true when all three match.
+ */
+export declare function sameFile(a: FileSignature, b: FileSignature): boolean;
+/**
+ * Remove the files already present, and repeats within the batch itself.
+ * @param present - files already attached.
+ * @param incoming - the new batch, in order.
+ * @returns the members of `incoming` worth adding, in order.
+ */
+export declare function freshFiles<F extends FileSignature>(present: readonly FileSignature[], incoming: readonly F[]): F[];
+/**
+ * Whether a paste's plain-text flavor only restates the files it carries.
+ *
+ * A file copied in Finder or Explorer arrives with its name (or a `file://`
+ * URL) on `text/plain` beside the bytes. Inserting that text next to the
+ * attachment would put the file in the message twice, so it is dropped — but
+ * only then. A spreadsheet copy carries real text beside a rendered PNG, and
+ * that text is the point of the paste.
+ * @param text - the clipboard's plain-text flavor.
+ * @param names - names of the pasted files.
+ * @returns true when every line is one of the file names or a local file URL.
+ */
+export declare function pasteTextIsFileNames(text: string, names: readonly string[]): boolean;
 /** Successful staging answer. */
 export interface StageOk {
     /** Absolute path of the staged copy. */
@@ -178,23 +256,33 @@ export declare function safeStageName(raw: string): string;
  * @returns the candidate segment.
  */
 export declare function stageCandidate(name: string, attempt: number): string;
+/** What a mention names: one file, or a directory (spelled with a trailing slash). */
+export type MentionKind = 'file' | 'directory';
 /**
  * Render one absolute path as the composer's `@` file mention.
  *
- * The quoted form is the upstream syntax for paths containing whitespace
- * (`@"path with spaces"`), so quoting is driven by the path's content rather
- * than applied unconditionally — an unquoted mention is what the completion
- * menu itself inserts, and matching it keeps a dropped reference
- * indistinguishable from a typed one.
+ * Mirrors upstream `formatFileMention()` rule for rule, because the model's
+ * reference prompt parses what that function writes:
+ *
+ * - a path containing a control character or a double quote has no mention
+ *   form at all, so the answer is `undefined` and the caller falls back to a
+ *   copy under a safe name;
+ * - whitespace forces the quoted form (`@"path with spaces"`), anything else
+ *   stays bare — which is what the completion menu itself inserts, so a
+ *   dropped reference is indistinguishable from a typed one;
+ * - a directory ends in `/`, and its quoted form leaves the quote open, the
+ *   way upstream writes folder chips.
  * @param path - absolute filesystem path.
- * @returns the draft text for one reference occurrence.
+ * @param kind - whether the path names a file or a directory.
+ * @returns the draft text for one reference, or undefined when unrepresentable.
  */
-export declare function mentionFor(path: string): string;
+export declare function mentionFor(path: string, kind?: MentionKind): string | undefined;
 /**
  * The display name of one staged path.
  *
  * Just the base name — the full path is what the model receives, and what the
- * preview card shows is what the user needs to recognize the file by.
+ * preview card shows is what the user needs to recognize the file by. A
+ * trailing separator is ignored, so a directory reads as its own name.
  * @param path - absolute filesystem path.
  * @returns the last path segment, or the whole path when it has no separator.
  */

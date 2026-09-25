@@ -7,8 +7,8 @@
  * transport controls, a PDF goes to the browser's own viewer, and a text file
  * renders as monospaced source. A format with no in-page renderer — Word,
  * Keynote, an archive — says so rather than showing a broken frame; the file
- * is still referenced in the draft either way, so the preview failing is not
- * the send failing.
+ * is still attached either way, so the preview failing is not the send
+ * failing.
  *
  * Focus is moved in on mount, cycled inside the dialog while it is open, and
  * restored to the opener on unmount. That last part matters because the opener
@@ -108,8 +108,8 @@ export function DropLightbox({ name, asset, text, onClose, t }: DropLightboxProp
       const dialog = dialogRef.current
       if (dialog === null) return
       // Contain tab navigation: the composer behind this dialog is still a
-      // focusable textarea, and tabbing into it would leave an open modal
-      // over an input the user cannot see they are typing into.
+      // focusable input, and tabbing into it would leave an open modal over
+      // an input the user cannot see they are typing into.
       const stops = focusables(dialog)
       if (stops.length === 0) return
       const first = stops[0]!
@@ -168,7 +168,7 @@ export function DropLightbox({ name, asset, text, onClose, t }: DropLightboxProp
  * A hook rather than an effect inside {@link DropLightbox} so the dialog stays
  * a pure function of its props: the caller owns the async read, and a preview
  * of a file that does not render as text never starts one.
- * @param path - the previewed path, or null when nothing text-shaped is open.
+ * @param path - the previewed attachment key, or null when nothing text-shaped is open.
  * @param read - the store's decoder.
  * @returns the decoded text, or undefined while loading or unavailable.
  */

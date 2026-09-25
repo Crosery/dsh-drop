@@ -214,13 +214,50 @@ const SHEET = `
 }
 .dshdrop-item:hover .dshdrop-remove,
 .dshdrop-remove:focus-visible { opacity: 1; }
+
+/* A card whose file is still being prepared or uploaded: dimmed, with a
+   moving edge so it reads as in progress rather than broken. */
+.dshdrop-item[data-state="busy"] .dshdrop-doc,
+.dshdrop-item[data-state="busy"] .dshdrop-thumb {
+  opacity: .7;
+  border-style: dashed;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .dshdrop-item[data-state="busy"] .dshdrop-doc,
+  .dshdrop-item[data-state="busy"] .dshdrop-thumb { animation: dshdrop-pulse 1.2s ease-in-out infinite alternate; }
+  @keyframes dshdrop-pulse { from { opacity: .55 } to { opacity: .85 } }
+}
+/* A failed upload keeps its card, tinted, with the composer's retry beside
+   the remove control. */
+.dshdrop-item[data-state="error"] .dshdrop-doc,
+.dshdrop-item[data-state="error"] .dshdrop-thumb {
+  border-color: var(--dsw-alias-state-error-primary);
+}
+.dshdrop-item[data-state="error"] .dshdrop-meta { color: var(--dsw-alias-state-error-primary); }
+.dshdrop-retry {
+  position: absolute;
+  top: 4px;
+  right: 26px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--dsw-alias-button-contrast-fill);
+  color: var(--dsw-alias-label-primary-inverted);
+  cursor: pointer;
+}
 /* Touch surfaces have no hover, so the control has to stay put. */
 @media (pointer: coarse) { .dshdrop-remove { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .dshdrop-remove { transition: none; } }
 
 .dshdrop-thumb:focus-visible,
 .dshdrop-doc:focus-visible,
-.dshdrop-remove:focus-visible {
+.dshdrop-remove:focus-visible,
+.dshdrop-retry:focus-visible {
   outline: 2px solid var(--dsw-alias-state-business-primary);
   outline-offset: 1px;
 }

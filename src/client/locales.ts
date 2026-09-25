@@ -25,8 +25,10 @@ export type DropKey =
   | 'kind.image' | 'kind.video' | 'kind.audio' | 'kind.pdf'
   | 'kind.document' | 'kind.text' | 'kind.archive' | 'kind.file'
   | 'action.remove' | 'action.open' | 'action.close' | 'action.openTab'
-  | 'action.scrollLeft' | 'action.scrollRight'
+  | 'action.scrollLeft' | 'action.scrollRight' | 'action.retry'
   | 'state.noPreview' | 'state.reloaded' | 'state.binary'
+  | 'state.staging' | 'state.uploading' | 'state.failed'
+  | 'state.inPlace' | 'state.copied'
   | 'media.noVideo' | 'media.noAudio'
 
 /** Simplified Chinese copy. */
@@ -46,9 +48,15 @@ export const zh: Record<DropKey, string> = {
   'action.openTab': '在新标签打开',
   'action.scrollLeft': '向前查看',
   'action.scrollRight': '向后查看',
+  'action.retry': '重新上传 {name}',
   'state.noPreview': '该格式无法在页面内预览',
   'state.reloaded': '页面已刷新，预览内容不可用',
   'state.binary': '二进制内容，不作文本预览',
+  'state.staging': '准备中…',
+  'state.uploading': '上传中 {percent}',
+  'state.failed': '上传失败',
+  'state.inPlace': '引用原文件',
+  'state.copied': '已复制副本',
   'media.noVideo': '当前浏览器无法播放该视频格式',
   'media.noAudio': '当前浏览器无法播放该音频格式',
 }
@@ -77,9 +85,15 @@ export const en: Record<DropKey, string> = {
   'action.openTab': 'Open in a new tab',
   'action.scrollLeft': 'Scroll back',
   'action.scrollRight': 'Scroll forward',
+  'action.retry': 'Retry uploading {name}',
   'state.noPreview': 'This format cannot be previewed in the page',
   'state.reloaded': 'The page reloaded; preview content is unavailable',
   'state.binary': 'Binary content, not shown as text',
+  'state.staging': 'Preparing…',
+  'state.uploading': 'Uploading {percent}',
+  'state.failed': 'Upload failed',
+  'state.inPlace': 'Referenced in place',
+  'state.copied': 'Copied',
   'media.noVideo': 'This browser cannot play that video format',
   'media.noAudio': 'This browser cannot play that audio format',
 }

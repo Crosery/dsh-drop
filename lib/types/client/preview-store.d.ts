@@ -10,8 +10,9 @@
  *
  * Object URLs are process-global and are not reclaimed by unmounting the
  * element that used them, so somebody has to own their lifetime. That owner is
- * this store: one URL per path, minted when the file is recorded, all of them
- * revoked when the plugin unloads.
+ * this store: one URL per key, minted when the file is recorded, revoked when
+ * the attachment it backs leaves (sent or removed), and all of them revoked
+ * when the plugin unloads.
  * @module @crosery/dsh-drop/client/preview-store
  */
 import { type DropKind } from '../preview.ts';
@@ -29,11 +30,12 @@ export interface DropAsset {
     readonly url: string | undefined;
 }
 /**
- * Per-path preview material for the files dropped in this page's lifetime.
+ * Per-attachment preview material for the files dropped in this page's
+ * lifetime.
  *
- * Keyed by path rather than by occurrence id: the path is what survives the
- * machine's occurrence churn, so deleting a chip and dropping the same file
- * again reuses the URL and the decoded text instead of paying for both twice.
+ * Keyed by an opaque key the caller chooses: a staged entry's own key, or a
+ * composer draft's id. A key names one attachment for as long as it is
+ * attached, and {@link release} lets its bytes go the moment it is not.
  */
 export declare class PreviewStore {
     private readonly assets;
@@ -42,13 +44,12 @@ export declare class PreviewStore {
     private readonly urls;
     private disposed;
     /**
-     * Record one acquired file against the path it was referenced by.
+     * Record one file against the attachment key it backs.
      *
-     * Idempotent per path: a second drop of the same file keeps the first
-     * asset, so a card never flickers through a new object URL for identical
-     * bytes.
-     * @param path - the absolute path inserted into the draft.
-     * @param file - the dropped file that path stands for.
+     * Idempotent per key: a second put keeps the first asset, so a card never
+     * flickers through a new object URL for identical bytes.
+     * @param path - the attachment key.
+     * @param file - the dropped file that key stands for.
      */
     put(path: string, file: File): void;
     /**
@@ -68,6 +69,11 @@ export declare class PreviewStore {
      * @returns the decoded prefix, or undefined.
      */
     text(path: string): Promise<string | undefined>;
+    /**
+     * Let one attachment's preview material go: revoke its URL and drop its bytes.
+     * @param path - the attachment key.
+     */
+    release(path: string): void;
     /** Revoke every URL this store minted and drop its retained bytes. */
     dispose(): void;
     /**
