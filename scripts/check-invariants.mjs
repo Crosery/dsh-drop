@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync, existsSync, readdirSync } from 'node:fs'
 import semver from 'semver'
 import { en, zh } from '../src/client/locales.ts'
+import { FLOOR, harnessPeers, sweepStart } from './harness-lib.mjs'
 import { fileURLToPath } from 'node:url'
 process.chdir(fileURLToPath(new URL('..', import.meta.url)))
 const read = p => readFileSync(p, 'utf8')
@@ -52,9 +53,13 @@ for (const [name, range] of Object.entries(pkg.peerDependencies)) {
     assert.ok(semver.satisfies(train, range, { includePrerelease: true }), `${name} rejects ${train} under includePrerelease (dsh ≥0.1.7 install/boot check)`)
   }
   for (const train of OUTSIDE) {
-    assert.ok(!semver.satisfies(train, range, { includePrerelease: true }), `${name} admits ${train}, which is outside the documented support`)
+    assert.ok(!semver.satisfies(train, range), `${name} admits ${train} under the default rule, which is outside the documented support`)
+    assert.ok(!semver.satisfies(train, range, { includePrerelease: true }), `${name} admits ${train} under includePrerelease (dsh ≥0.1.7 would load it), which is outside the documented support`)
   }
 }
+// The CI floor cell and the sweep's start are derived from the same facts.
+assert.ok(VERIFIED_TRAINS.includes(FLOOR), `the CI floor ${FLOOR} is not a verified train`)
+assert.equal(sweepStart(harnessPeers(pkg)), VERIFIED_TRAINS[0], 'the sweep must start at the oldest verified train')
 
 // The browser bundle must not reach into the UI-primitives module: its icon
 // exports were renamed between trains (`IconCloseOutline16` → `…Regular`), and
@@ -68,10 +73,37 @@ assert.equal(read('CLAUDE.md').trim(), '@AGENTS.md')
 for (const file of readdirSync('docs').filter(f => f.endsWith('.md') && !f.endsWith('.zh.md'))) {
   assert.ok(existsSync('docs/' + file.replace('.md','.zh.md')), 'unpaired doc: ' + file)
 }
+// README facts a user acts on: limits, the supported span and the CI floor,
+// the desktop runtime, the settings namespace and entry, the stable asset and
+// the desktop install path, and a pinned install of THIS version.
 for (const file of ['README.md','README.zh.md']) {
   const text = read(file)
-  for (const claim of ['512','64 KiB','0.1.1-rc.2','0.1.5-rc.2','0.1.7-rc.2','crosery-drop']) assert.ok(text.includes(claim), file + ' omits ' + claim)
+  const claims = ['512', '64 KiB', VERIFIED_TRAINS[0], FLOOR, VERIFIED_TRAINS.at(-1), 'crosery-drop', '`drop`',
+    'releases/latest/download/dsh-drop.tgz', `download/v${pkg.version}`, 'folderMaxFiles']
+  for (const claim of claims) assert.ok(text.includes(claim), file + ' omits ' + claim)
+  assert.ok(file.endsWith('.zh.md') ? text.includes('插件 → 添加插件') : text.includes('Plugins → Add plugin'), file + ' omits the desktop install path')
+  for (const stale of text.matchAll(/download\/v(\d+\.\d+\.\d+)/g)) assert.equal(stale[1], pkg.version, file + ' pins a stale release: v' + stale[1])
 }
+for (const file of ['docs/releasing.md','docs/releasing.zh.md']) {
+  for (const stale of read(file).matchAll(/download\/v(\d+\.\d+\.\d+)/g)) assert.equal(stale[1], pkg.version, file + ' pins a stale release: v' + stale[1])
+}
+for (const file of ['CHANGELOG.md','CHANGELOG.zh.md']) {
+  assert.equal(/^## (\S+)/m.exec(read(file))?.[1], pkg.version, file + ' has no entry for ' + pkg.version)
+}
+
+// CI wiring the compatibility claims rest on: pull requests gate on the pinned
+// train and the floor, the desktop cell runs beside them, and a release is
+// gated on those plus the desktop bytes and the full sweep.
+const ci = read('.github/workflows/ci.yml')
+const release = read('.github/workflows/release.yml')
+const compat = read('.github/workflows/harness-compat.yml')
+assert.match(ci, /uses: \.\/\.github\/workflows\/harness-compat\.yml\s+with:\s+cells: pinned,floor/, 'ci.yml must gate on the pinned and floor cells')
+assert.match(ci, /cells: desktop\b/, 'ci.yml must run the desktop cell')
+assert.match(release, /needs: gate/, 'release.yml must wait for its gate')
+assert.match(release, /cells: pinned,floor,desktop,sweep/, 'the release gate must cover pinned, floor, desktop and the sweep')
+assert.match(release, /desktop-bytes: true/, 'the release gate must smoke the desktop bytes')
+assert.match(release, /dsh-drop\.tgz SHA256SUMS/, 'a release attaches dsh-drop.tgz and SHA256SUMS')
+for (const stage of ['smoke-boot.mjs', 'check-dist.mjs --bundle-only', '--admits', 'harness-verdict.cjs', 'desktop-bytes']) assert.ok(compat.includes(stage), 'harness-compat.yml lost ' + stage)
 const shots = JSON.parse(read('screenshots.json'))
 assert.ok(Array.isArray(shots) && shots.length >= 1 && shots.length <= 8)
 for (const rel of shots) {
@@ -80,4 +112,4 @@ for (const rel of shots) {
 }
 assert.ok(!read('src/client/DropLightbox.tsx').includes('target="_blank"'), 'untrusted preview navigation')
 assert.ok(!/link:|\/Users\//.test(read('package-lock.json')), 'lockfile contains machine-local dependency')
-console.log('Invariants OK: locales, peers (both semver rules), public dependencies, bundle purity, manifests, docs, screenshots and preview navigation')
+console.log('Invariants OK: locales, peers (both semver rules), CI floor and sweep start, public dependencies, bundle purity, manifests, README facts, changelog, CI wiring, docs, screenshots and preview navigation')

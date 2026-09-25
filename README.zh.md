@@ -12,7 +12,20 @@
 
 ## 安装
 
-要求 DeepSeek Harness **0.1.0-rc.8 至 0.1.7**——该区间内每个已发布序列都做过类型检查和测试，包括 0.1.1-rc.2、0.1.5-rc.2（npm `latest` 为 0.1.5-rc.3）以及桌面应用运行时 0.1.7-rc.2；逐版本结果见[上游兼容性](docs/harness-compatibility.zh.md)。DSH 0.1.7 会拒绝安装或加载 peer 范围不包含它的插件，所以本插件的旧版本在 0.1.7 上无法加载。
+| 场景 | 支持范围 | 验证方式 |
+| --- | --- | --- |
+| **Web**（`dsh --profile web`） | **0.1.0-rc.8 至 0.1.7-rc.2** | 该区间内每个已发布版本都通过类型检查和测试，且被 peer 范围接纳。打包后的插件在 0.1.1-rc.2 地板、0.1.7-rc.2（npm `next`）以及其余每个元组的最新构建（含 npm `latest` 0.1.5-rc.3）上完成启动冒烟：用 `dsh plugin add` 安装、激活、路由应答、浏览器半边被服务端提供。 |
+| **桌面应用** | **0.1.7-rc.2** | 在应用自带的运行时（即其更新 feed 发布的版本）上跑同样的启动冒烟。应用窗口和原生拖放不在 CI 覆盖范围内。 |
+
+从 0.1.7 起，DSH 会拒绝安装、并在启动时跳过 peer 范围不包含它的插件——0.2.0 之前的版本在 0.1.7 上无法加载。更新的 harness 只有经 CI 验证后才会纳入；逐版本证据见[上游兼容性](docs/harness-compatibility.zh.md)。
+
+**桌面应用：** 打开 **插件 → 添加插件**，粘贴发布地址后重启应用：
+
+~~~text
+https://github.com/Crosery/dsh-drop/releases/latest/download/dsh-drop.tgz
+~~~
+
+`dsh plugin` 命令行拒绝操作桌面 profile，所以只能通过插件页安装；升级已安装的插件同样需要重启。
 
 **Web：** PATH 上有 pnpm，以及 DSH 支持的偶数 Node 主版本（CI：22.19 / 24）。安装预构建包，然后**重启 profile**：
 
@@ -20,15 +33,13 @@
 dsh plugin --profile web add https://github.com/Crosery/dsh-drop/releases/latest/download/dsh-drop.tgz
 ~~~
 
-tarball 已包含双半边产物，安装不用运行插件构建。固定版本时将 latest/download 替换为 download/v0.1.3。仓库同时提交了构建产物，因此 `dsh plugin --profile web add github:crosery/dsh-drop` 不需要任何构建授权即可安装；需要可复现时优先用打 tag 的 tarball。若本地 patch 已挂载 @crosery/dsh-drop，勿重复安装。
+tarball 已包含双半边产物，安装不用运行插件构建。固定版本时将 latest/download 替换为 download/v0.2.0。仓库同时提交了构建产物，因此 `dsh plugin --profile web add github:crosery/dsh-drop` 不需要任何构建授权即可安装；需要可复现时优先用打 tag 的 tarball。若本地 patch 已挂载 @crosery/dsh-drop，勿重复安装。
 
 ~~~sh
 dsh plugin --profile web remove @crosery/dsh-drop
 ~~~
 
 移除后同样需要重启。[源码安装与发版流程](docs/releasing.zh.md)。
-
-**桌面应用：** `dsh plugin` 命令行拒绝操作桌面 profile。在应用里打开 **插件 → 添加插件**，粘贴上面的发布地址；升级已安装的插件需要重启应用。
 
 ## 文件如何抵达模型
 
@@ -100,7 +111,7 @@ dsh plugin --profile web remove @crosery/dsh-drop
 
 ## 安全
 
-没有第三方上传服务、分析统计、自动执行或解压。暂存是 Host 写端点：文件名归约成单段、限制大小、拒绝简单跨站 POST、不授予 CORS。复制文件夹时，Host 会重新清洗每个相对路径（不允许 `.` 或 `..` 段、去掉控制字符、替换 Windows 保留名、限制字节长度），只写入该批次自己的私有目录，且从不覆盖已有路径。在 **0.1.7** 上三条路由还要求 harness 自身的登录鉴权（其 connection 检查），没有登录 cookie 的其他本机进程会被拒绝。**更早的序列上这些路由没有自己的鉴权**：保持 DSH 仅本机可访问或置于认证之后，不向不受信任用户暴露宿主权限。同源插件拥有页面权限。
+没有第三方上传服务、分析统计、自动执行或解压。暂存是 Host 写端点：文件名归约成单段、限制大小、拒绝简单跨站 POST、不授予 CORS。复制文件夹时，Host 会重新清洗每个相对路径（不允许 `.` 或 `..` 段、去掉控制字符、替换 Windows 保留名、限制字节长度），只写入该批次自己的私有目录，且从不覆盖已有路径。从 **0.1.2** 起三条路由还要求 harness 自身的登录鉴权（其 connection 检查），没有登录 cookie 的其他本机进程会被拒绝——CI 在每个做启动冒烟的序列上都会检查这一点。**0.1.0–0.1.1 上这些路由没有自己的鉴权**：保持 DSH 仅本机可访问或置于认证之后，不向不受信任用户暴露宿主权限。同源插件拥有页面权限。
 
 SVG 留在图片元素，HTML 只展示转义源码，PDF blob 强制 application/pdf；预览不提供顶层 blob 导航。默认保留期清理不等于安全擦除。参见[开发与安全边界](docs/development.zh.md)。
 
@@ -115,7 +126,7 @@ npm run check
 npm run check:dist
 ~~~
 
-仓库自足，依赖公开 pin 版本，不要求兄弟 checkout。[AGENTS.md](AGENTS.md) 路由到[双语开发、PR、发版与兼容规范](docs/README.zh.md)。四套工作流分别负责 CI、确定性 PR 评审、受验证约束的 Release 和定期上游漂移检测。
+仓库自足，依赖公开 pin 版本，不要求兄弟 checkout。[AGENTS.md](AGENTS.md) 路由到[双语开发、PR、发版与兼容规范](docs/README.zh.md)。CI 在 Node 22.19 和 24 上跑以上门禁，另跑两个 harness 组合——固定的 0.1.7-rc.2 开发序列和 0.1.1-rc.2 地板——每格都做类型检查、测试、peer 准入和打包插件的启动冒烟；第三格跟随桌面应用的版本。Harness compatibility 工作流每天对桌面应用 feed 与 npm `latest` / `next` / `alpha` 运行，每周扫描全部已发布的 harness 版本，并在 macOS 上对桌面应用本体运行。发版必须先通过这道门禁。
 
 ## 许可
 

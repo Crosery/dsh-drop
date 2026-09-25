@@ -12,7 +12,20 @@ Drag or paste files into **DeepSeek Harness** — the Web app and the desktop ap
 
 ## Install
 
-Requires DeepSeek Harness from **0.1.0-rc.8 through 0.1.7** — every published train in that span is typechecked and tested, including 0.1.1-rc.2, 0.1.5-rc.2 (npm `latest` is 0.1.5-rc.3) and 0.1.7-rc.2, the desktop app's runtime; the per-version table is in [Harness compatibility](docs/harness-compatibility.md). DSH 0.1.7 refuses to install or load a plugin whose peer ranges do not admit it, so older releases of this plugin do not load there.
+| Where | Supported | Verified |
+| --- | --- | --- |
+| **Web** (`dsh --profile web`) | **0.1.0-rc.8 through 0.1.7-rc.2** | Every published version in that span typechecks, passes the tests and is admitted by the peer ranges. The packed plugin boots — installed with `dsh plugin add`, activated, its routes answering, its browser half served — on the 0.1.1-rc.2 floor, on 0.1.7-rc.2 (npm `next`) and on the newest build of every other tuple, npm `latest` 0.1.5-rc.3 included. |
+| **Desktop app** | **0.1.7-rc.2** | The same boot smoke on the app's own runtime, the version its update feeds ship. The app's window and native drag-and-drop are not driven by CI. |
+
+From 0.1.7 DSH refuses to install, and skips at boot, a plugin whose peer ranges do not admit it — releases before 0.2.0 do not load there. A newer harness is admitted only after CI has verified it; the per-version evidence is in [Harness compatibility](docs/harness-compatibility.md).
+
+**Desktop app:** open **Plugins → Add plugin**, paste the release URL and restart the app:
+
+~~~text
+https://github.com/Crosery/dsh-drop/releases/latest/download/dsh-drop.tgz
+~~~
+
+The `dsh plugin` CLI refuses the desktop profile, so the Plugins page is the way in; upgrading an installed plugin also needs a restart.
 
 **Web:** pnpm on PATH and an even Node major supported by DSH (CI: 22.19 / 24). Install the prebuilt release, then **restart the profile**:
 
@@ -20,15 +33,13 @@ Requires DeepSeek Harness from **0.1.0-rc.8 through 0.1.7** — every published 
 dsh plugin --profile web add https://github.com/Crosery/dsh-drop/releases/latest/download/dsh-drop.tgz
 ~~~
 
-The tarball includes both compiled halves, so installation does not run a plugin build. For a pinned install, replace latest/download with download/v0.1.3. The repository also ships the built halves, so `dsh plugin --profile web add github:crosery/dsh-drop` installs with no build approval; prefer the tag-pinned tarball for reproducibility. Do not install a second copy if your local patch already mounts @crosery/dsh-drop.
+The tarball includes both compiled halves, so installation does not run a plugin build. For a pinned install, replace latest/download with download/v0.2.0. The repository also ships the built halves, so `dsh plugin --profile web add github:crosery/dsh-drop` installs with no build approval; prefer the tag-pinned tarball for reproducibility. Do not install a second copy if your local patch already mounts @crosery/dsh-drop.
 
 ~~~sh
 dsh plugin --profile web remove @crosery/dsh-drop
 ~~~
 
 Restart after removal too. [Source builds and release procedure](docs/releasing.md).
-
-**Desktop app:** the `dsh plugin` CLI refuses the desktop profile. Open **Plugins → Add plugin** in the app and paste the release URL above; upgrading an installed plugin needs an app restart.
 
 ## What happens to a file?
 
@@ -100,7 +111,7 @@ Cleanup runs at activation and when retention changes. It deletes expired date-n
 
 ## Security
 
-No third-party upload service, analytics, automatic execution or archive extraction. Staging is a Host write endpoint: names are reduced to one segment, size is bounded, simple cross-site POSTs are refused, and no CORS access is granted. A copied folder's relative paths are re-sanitized on the Host (no `.` or `..` segments, control characters stripped, Windows-reserved names replaced, byte budgets), written only inside that batch's private directory, and never over an existing path. On **0.1.7** all three routes also require the harness's own login authentication (its connection check), so another local process without the login cookie is refused. **On earlier trains the routes have no authentication of their own**: keep DSH loopback-only or behind authenticated access; do not expose its host authority to untrusted users. Same-origin plugins can act with the page's authority.
+No third-party upload service, analytics, automatic execution or archive extraction. Staging is a Host write endpoint: names are reduced to one segment, size is bounded, simple cross-site POSTs are refused, and no CORS access is granted. A copied folder's relative paths are re-sanitized on the Host (no `.` or `..` segments, control characters stripped, Windows-reserved names replaced, byte budgets), written only inside that batch's private directory, and never over an existing path. From **0.1.2** all three routes also require the harness's own login authentication (its connection check), so another local process without the login cookie is refused — CI checks this on every booted train. **On 0.1.0–0.1.1 the routes have no authentication of their own**: keep DSH loopback-only or behind authenticated access; do not expose its host authority to untrusted users. Same-origin plugins can act with the page's authority.
 
 SVG remains inside an image element, HTML is escaped text, and PDF blobs are forced to application/pdf. Preview UI does not offer top-level blob navigation. The default retention is not secure erasure. See [development and security boundaries](docs/development.md).
 
@@ -115,7 +126,7 @@ npm run check
 npm run check:dist
 ~~~
 
-This repository is self-contained and uses public pinned dependencies, not a sibling checkout. [AGENTS.md](AGENTS.md) routes contributors to the [paired development, PR, release and compatibility docs](docs/README.md). Four workflows cover CI, deterministic PR review, gated Release and scheduled upstream drift detection.
+This repository is self-contained and uses public pinned dependencies, not a sibling checkout. [AGENTS.md](AGENTS.md) routes contributors to the [paired development, PR, release and compatibility docs](docs/README.md). CI runs these gates on Node 22.19 and 24 plus two harness cells — the pinned 0.1.7-rc.2 train and the 0.1.1-rc.2 floor — each with typecheck, tests, peer admission and a boot smoke of the packed plugin; a third cell follows the desktop app's version. The Harness compatibility workflow runs daily against the desktop app's feeds and npm `latest` / `next` / `alpha`, weekly across every published harness version, and on macOS against the desktop app itself. A release is published only after that gate.
 
 ## License
 

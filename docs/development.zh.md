@@ -32,7 +32,7 @@ Host 注册 POST /crosery/dsh-drop/resolve（只 stat 比对路径，文件或�
 
 resolve 路由上的文件夹声明用最多八个文件（相对路径、大小、修改时间）代替大小和修改时间。每个都必须互不相同、通过 `safeRelativeSegments`、是 `lstat` 意义上的普通文件、真实路径位于该目录真实路径之内，且在 2 秒误差内匹配；样本数必须达到文件夹允许的数量（`min(8, 文件数)`），空样本要求目录里只有被忽略的名称。之后才统计文件夹——广度优先 `readdir`，链接只计数不跟随，忽略的名称计数但不打开，上限 50 000 个条目、2 秒和层级上限，碰到任一上限即标记 `truncated`——返回的只有计数，没有名称。原位引用的文件夹就是真实目录：模型能在那里列出 `.git`。
 
-三条路由都先询问 Host 的准入检查，每次请求时经 `ctx.get('connection')?.requestRejection(req)` 读取：在 0.1.7 上它是 harness 的 Host/Origin 围栏加登录 cookie 鉴权，未鉴权的调用方在读写任何东西之前就收到 401。更早的序列没有该服务，检查一律放行。其后是 CSRF 闸门：stage 要求非简单请求头（名称头，文件夹文件则是批次头），resolve 和 batch 要求 `application/json` 请求体，三者都拒绝非同源 Fetch Metadata（缺失时放行——桌面转发器会剥掉它），且不授予 CORS 权限。在 0.1.7 之前的序列上这只是 CSRF 防护，不是鉴权：保持 DSH 仅监听本机或置于认证访问之后；同源插件和受信任本地客户端仍具有宿主权限。
+三条路由都先询问 Host 的准入检查，每次请求时经 `ctx.get('connection')?.requestRejection(req)` 读取：从 0.1.2 起（该服务出现于 0.1.2-alpha.2）它是 harness 的 Host/Origin 围栏加登录 cookie 鉴权，未鉴权的调用方在读写任何东西之前就收到 401。0.1.0 与 0.1.1 没有该服务，检查一律放行。其后是 CSRF 闸门：stage 要求非简单请求头（名称头，文件夹文件则是批次头），resolve 和 batch 要求 `application/json` 请求体，三者都拒绝非同源 Fetch Metadata（缺失时放行——桌面转发器会剥掉它），且不授予 CORS 权限。在 0.1.0–0.1.1 上这只是 CSRF 防护，不是鉴权：保持 DSH 仅监听本机或置于认证访问之后；同源插件和受信任本地客户端仍具有宿主权限。
 
 禁止在新标签导航拖入文件的 blob URL：SVG 在 img 中安全不代表顶层文档安全。HTML/XML 只显示转义源码；PDF 即使收到 HTML MIME 也强制 application/pdf。浏览器不一定支持所有编解码器/PDF。不会自动执行或解压文件。清理会删除 DSH_HOME/drops 下过期日期目录，目录内手工放的东西也会一起删除。
 
@@ -40,6 +40,6 @@ resolve 路由上的文件夹声明用最多八个文件（相对路径、大小
 
 运行 npm run typecheck、npm test、npm run build、npm run check、npm run check:dist。Host 测试使用真实 HTTP 和临时目录；发送拦截在 `tests/submit-flow.test.ts` 中以小型文档模型验证。两半边分开 typecheck；测试可以包含 DOM 类型，但不能同时拉入相冲突的 Context 增强。新增行为补能在旧实现上失败的回归。UI 修改要在已有 DSH URL 刷新后用合成文件验证：纯图片、混合拖放、粘贴、移除、文本/PDF 预览、灯箱键盘焦点、窄栏、纯文件 Enter；文件夹则用 CDP `Input.dispatchDragEvent` 拖入真实文件夹（`data.files` 可以是目录路径）、打桩的 `__DSH_HOST_PATHS__`、超限文件夹，以及在 `Network.emulateNetworkConditions` 限速下上传中途移除。截图不能暴露真实文档和会话历史。仅记录实际跑过的验证。
 
-任何客户端改动都必须对全部已发布序列通过类型检查和测试，而不只是 pin 的那一个：`node scripts/sweep-trains.mjs` 为每个序列复制一份树，把 `@deepseek-ai/dsh-*` devDependency 指向该精确版本，再运行 typecheck 和测试（见 docs/harness-compatibility.zh.md）。`lib/` 已入库，因此源码改动要跟着跑 npm run build 并提交重新生成的产物，否则 check:dist 会红。
+任何客户端改动都必须对全部已发布序列通过类型检查和测试，而不只是 pin 的那一个：`node scripts/sweep-trains.mjs` 为每个序列复制一份树，用与 CI 各格相同的 `scripts/harness-target.mjs --repoint --install` 切到该精确版本，再运行 typecheck、产物的 harness 模块成员检查（`check-dist.mjs --bundle-only`）和测试（见 docs/harness-compatibility.zh.md）。改动 Host 路由、清单或产物时还要跑 `node scripts/smoke-boot.mjs --dsh <版本>`：它在一次性 home 里用 `dsh plugin add` 安装打包后的插件，启动 `dsh --profile web`，检查激活、三条路由（0.1.2 起无登录 cookie 返回 401，并实际暂存与解析一次）以及按 shell 模块表和该序列导出评估的浏览器产物。`lib/` 已入库，因此源码改动要跟着跑 npm run build 并提交重新生成的产物，否则 check:dist 会红。
 
 来源：src/index.ts、src/contract.ts、src/folder.ts、三条 route（stage-route、folder-stage、resolve-route）、src/client/*.ts 及 pin 版本的 dsh-client-ui-conversation 公开席位与输入声明。
