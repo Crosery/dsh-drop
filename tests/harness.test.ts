@@ -104,12 +104,17 @@ test('repointing keeps the pin of a package the train never published, unless th
     },
   }
   type Plan = { manifest: typeof fixture, missing: string[], kept: string[], added: string[] }
-  const published = (absent: string[]) => ({ publishedAt: (name: string) => !absent.includes(name), shipped: { '@deepseek-ai/cordis': '^4.0.1' } })
+  // The train ships a cordis range; the pin becomes the exact version it installs.
+  const published = (absent: string[]) => ({
+    publishedAt: (name: string) => !absent.includes(name),
+    shipped: { '@deepseek-ai/cordis': '^4.0.1' },
+    exact: (name: string, range: string) => (name === '@deepseek-ai/cordis' && range === '^4.0.1' ? '4.0.4' : undefined),
+  })
   const floor = planRepoint(fixture, FLOOR, published(['@deepseek-ai/dsh-client-store'])) as Plan
   assert.deepEqual(floor.missing, [])
   assert.deepEqual(floor.kept, ['@deepseek-ai/dsh-client-store'])
   assert.deepEqual(floor.manifest.devDependencies, {
-    '@deepseek-ai/cordis': '^4.0.1', '@deepseek-ai/dsh-client-store': '0.1.7-rc.2', '@deepseek-ai/dsh-client-ui-renderer': FLOOR,
+    '@deepseek-ai/cordis': '4.0.4', '@deepseek-ai/dsh-client-store': '0.1.7-rc.2', '@deepseek-ai/dsh-client-ui-renderer': FLOOR,
     '@deepseek-ai/dsh-settings': FLOOR, typescript: '^5.9.0',
     // The slot registry's 0.1.0–0.1.1 declaration home rides along at the train's version.
     [TRAIN_EXTRAS[0]!]: FLOOR,
@@ -121,6 +126,11 @@ test('repointing keeps the pin of a package the train never published, unless th
   assert.deepEqual(planRepoint(fixture, '0.1.0-rc.7', published([REQUIRED[0]!, ...TRAIN_EXTRAS])).missing, [REQUIRED[0]])
   const noPeer = planRepoint(fixture, '0.1.9-rc.1', published(['@deepseek-ai/dsh-settings', ...TRAIN_EXTRAS]))
   assert.deepEqual([noPeer.missing, noPeer.added], [['@deepseek-ai/dsh-settings'], []])
+  // An exact cordis is taken as is; one that cannot be resolved keeps the pin.
+  const exactShipped = planRepoint(fixture, FLOOR, { publishedAt: () => true, shipped: { '@deepseek-ai/cordis': '4.0.2' } }) as Plan
+  assert.equal(exactShipped.manifest.devDependencies['@deepseek-ai/cordis'], '4.0.2')
+  const unresolved = planRepoint(fixture, FLOOR, { publishedAt: () => true, shipped: { '@deepseek-ai/cordis': '^9.0.0' }, exact: () => undefined }) as Plan
+  assert.equal(unresolved.manifest.devDependencies['@deepseek-ai/cordis'], '4.0.4')
 })
 
 test('a desktop feed is read with its folded path and sha512', () => {

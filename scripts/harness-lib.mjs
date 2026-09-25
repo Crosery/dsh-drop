@@ -186,13 +186,14 @@ export function parseFeed(text) {
  * work without it ({@link REQUIRED}, or a harness peer): then it is `missing`,
  * and the train is out of scope. {@link TRAIN_EXTRAS} are added at the train's
  * version when it published them. `@deepseek-ai/cordis` follows what the
- * train's own `@deepseek-ai/dsh` ships, so a train that moved it is compiled
- * against what it runs; `schemastery` is this plugin's own runtime dependency
- * and stays as declared.
+ * train's own `@deepseek-ai/dsh` ships, resolved to the exact version that
+ * range installs today (`facts.exact`), so a train that moved it is compiled
+ * against what it runs and every pin stays exact; `schemastery` is this
+ * plugin's own runtime dependency and stays as declared.
  *
  * @param {object} pkg - the repository manifest.
  * @param {string} version - the exact harness version.
- * @param {{ publishedAt: (name: string) => boolean, shipped?: Record<string, string> }} facts
+ * @param {{ publishedAt: (name: string) => boolean, shipped?: Record<string, string>, exact?: (name: string, range: string) => string | undefined }} facts
  * @returns {{ manifest: object, missing: string[], kept: string[], added: string[] }}
  */
 export function planRepoint(pkg, version, facts) {
@@ -213,7 +214,10 @@ export function planRepoint(pkg, version, facts) {
     }
   }
   const cordis = facts.shipped?.['@deepseek-ai/cordis']
-  if (typeof cordis === 'string' && '@deepseek-ai/cordis' in manifest.devDependencies) manifest.devDependencies['@deepseek-ai/cordis'] = cordis
+  if (typeof cordis === 'string' && '@deepseek-ai/cordis' in manifest.devDependencies) {
+    const exact = semver.valid(cordis) ?? facts.exact?.('@deepseek-ai/cordis', cordis)
+    if (semver.valid(exact)) manifest.devDependencies['@deepseek-ai/cordis'] = exact
+  }
   return { manifest, missing, kept, added }
 }
 
@@ -267,6 +271,10 @@ export function repointManifest(pkg, version) {
   const plan = planRepoint(pkg, version, {
     publishedAt: (name) => versionsOf(name).includes(version),
     shipped: view(`${HARNESS}@${version}`, 'dependencies') ?? {},
+    exact: (name, range) => {
+      const found = view(`${name}@${range}`, 'version')
+      return Array.isArray(found) ? found.filter((v) => semver.valid(v)).sort(semver.compare).at(-1) : found
+    },
   })
   return { ...plan, missing: plan.missing.map((name) => ({ name, why: absence(name, version) })) }
 }
