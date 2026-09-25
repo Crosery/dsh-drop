@@ -25,9 +25,6 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import {
-  IconChevronLeftOutline14, IconChevronRightOutline14, IconCloseOutline16, IconPlayOutline16,
-} from '@deepseek-ai/dsh-client-ui-primitives'
 // Type-only: these pull the SlotMap declaration for the attachment seat, the
 // standard-kit merges, and the locale seat. A value import would fail the
 // bundle-purity gate.
@@ -44,6 +41,7 @@ import { fileNameOf } from '../contract.ts'
 import { formatDropBytes, kindBadge, type DropKind } from '../preview.ts'
 import type { AttachedFile } from './attached.ts'
 import { DropLightbox, usePreviewText } from './DropLightbox.tsx'
+import { ChevronLeftGlyph, ChevronRightGlyph, CloseGlyph, PlayGlyph } from './icons.tsx'
 import { DROP_NS, type DropKey } from './locales.ts'
 import type { DropAsset } from './preview-store.ts'
 import { useRailOverflow } from './use-rail-overflow.ts'
@@ -253,7 +251,7 @@ function Card({ item, url, onOpen, t }: {
               : <video src={`${url ?? ''}#t=0.1`} muted playsInline preload="metadata" />}
             {kind === 'video' && (
               <span className="dshdrop-play" aria-hidden="true">
-                <IconPlayOutline16 size={11} />
+                <PlayGlyph size={11} />
               </span>
             )}
           </button>
@@ -281,7 +279,7 @@ function Card({ item, url, onOpen, t }: {
         aria-label={t('action.remove', { name: item.name })}
         onClick={item.remove}
       >
-        <IconCloseOutline16 size={10} />
+        <CloseGlyph size={10} />
       </button>
     </div>
   )
@@ -408,7 +406,7 @@ export function DropRail({
           aria-label={t('action.scrollLeft')}
           onClick={() => { overflow.page(-1) }}
         >
-          <IconChevronLeftOutline14 size={14} />
+          <ChevronLeftGlyph size={14} />
         </button>
       )}
       {overflow.atEnd && (
@@ -418,7 +416,7 @@ export function DropRail({
           aria-label={t('action.scrollRight')}
           onClick={() => { overflow.page(1) }}
         >
-          <IconChevronRightOutline14 size={14} />
+          <ChevronRightGlyph size={14} />
         </button>
       )}
       {previewed !== null && (

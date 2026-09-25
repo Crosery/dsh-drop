@@ -20,9 +20,9 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode, ReactPortal } from 'react'
 import { createPortal } from 'react-dom'
-import { IconCloseOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import { formatDropBytes } from '../preview.ts'
+import { CloseGlyph } from './icons.tsx'
 import type { DropAsset } from './preview-store.ts'
 import { DROP_NS } from './locales.ts'
 
@@ -151,7 +151,7 @@ export function DropLightbox({ name, asset, text, onClose, t }: DropLightboxProp
           aria-label={t('action.close')}
           onClick={onClose}
         >
-          <IconCloseOutline16 size={16} />
+          <CloseGlyph size={16} />
         </button>
       </div>
       <div className="dshdrop-stage">
