@@ -32,7 +32,8 @@
  * authenticate by itself. From 0.1.2 each request is put through the Host's
  * own admission check (`connection.requestRejection`: its Host/Origin fence
  * and login-cookie authentication) before anything else; 0.1.0 and 0.1.1 have
- * no such check, and the routes keep their cross-site gates only.
+ * no such check, and the routes keep their cross-site gates only. On every
+ * train a request is refused while the connection service is down.
  * @module @crosery/dsh-drop
  */
 
@@ -221,16 +222,39 @@ interface ConnectionLike {
 /**
  * The running Host's admission check for raw Web routes, read per request.
  *
- * Read by name at request time rather than injected: `connection` exists from
- * 0.1.2 only, a hard `inject` would stop the plugin loading on 0.1.0 and
- * 0.1.1, and the service can come and go with the Web server itself.
+ * Every train publishes a `connection` service: it is the browser's `/api`
+ * transport, and each shipped Web composition carries it beside `webServer`.
+ * What differs is its login check — `requestRejection` exists from
+ * 0.1.2-alpha.2; the 0.1.0 and 0.1.1 service has none, and those trains admit.
+ *
+ * An absent service refuses (503) on every train rather than admitting. On
+ * 0.1.2 and later its absence is not evidence of an old harness: the
+ * connection plugin's `apply` is async (it awaits its browser-auth store), it
+ * is gone while a config edit restarts it, and gone for good if it fails to
+ * activate — each a moment when the harness's own `/api` is closed and an
+ * anonymous caller must not reach these routes. On 0.1.0 and 0.1.1 the
+ * refusal costs nothing: that plugin injects `webServer` and applies
+ * synchronously, so it is up whenever these routes are, and no page can talk
+ * to a Host without it anyway.
+ *
+ * The train is not detected any other way, on purpose. Resolving the
+ * connection package from here reads the profile's module tree, which can
+ * hold another version of a harness package than the one running; and the
+ * loader registers a plugin only once its module is imported, which can be
+ * after the Web server already listens.
+ *
+ * Read by name at request time rather than injected: a nested
+ * `inject(['connection'])` would unregister the routes, and drop every open
+ * folder batch with them, on each connection restart.
  * @param ctx - this plugin's context.
- * @returns the check; it admits everything when the Host offers none.
+ * @returns the check: 503 while the service is absent, the service's own
+ *   answer where it has a check, admission on the trains without one.
  */
 export function hostAdmission(ctx: { get(name: string): unknown }): RequestRejection {
   return (req) => {
     const connection = ctx.get('connection') as ConnectionLike | undefined
-    if (typeof connection?.requestRejection !== 'function') return undefined
+    if (connection === undefined || connection === null) return 503
+    if (typeof connection.requestRejection !== 'function') return undefined
     return connection.requestRejection(req)
   }
 }

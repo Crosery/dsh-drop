@@ -48,7 +48,8 @@ const MAX_COLLISION_ATTEMPTS = 100
  * otherwise open to any local caller. 0.1.0 and 0.1.1 have no such check, and
  * the callback answers undefined there.
  * @param req - the request.
- * @returns 401 or 403 to refuse, undefined to admit.
+ * @returns 401 or 403 to refuse, 503 while the check itself is unavailable,
+ *   undefined to admit.
  */
 export type RequestRejection = (req: IncomingMessage) => number | undefined
 
@@ -69,7 +70,8 @@ export function refused(reject: RequestRejection | undefined, req: IncomingMessa
   }
   if (status === undefined) return false
   req.resume()
-  const payload = JSON.stringify({ error: status === 401 ? 'unauthorized' : 'forbidden' } satisfies StageErr)
+  const error = status === 401 ? 'unauthorized' : status === 503 ? 'unavailable' : 'forbidden'
+  const payload = JSON.stringify({ error } satisfies StageErr)
   res.writeHead(status, {
     'content-type': 'application/json; charset=utf-8',
     'content-length': Buffer.byteLength(payload),

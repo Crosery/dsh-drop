@@ -32,7 +32,7 @@ Host 注册 POST /crosery/dsh-drop/resolve（只 stat 比对路径，文件或�
 
 resolve 路由上的文件夹声明用最多八个文件（相对路径、大小、修改时间）代替大小和修改时间。每个都必须互不相同、通过 `safeRelativeSegments`、是 `lstat` 意义上的普通文件、真实路径位于该目录真实路径之内，且在 2 秒误差内匹配；样本数必须达到文件夹允许的数量（`min(8, 文件数)`），空样本要求目录里只有被忽略的名称。之后才统计文件夹——广度优先 `readdir`，链接只计数不跟随，忽略的名称计数但不打开，上限 50 000 个条目、2 秒和层级上限，碰到任一上限即标记 `truncated`——返回的只有计数，没有名称。原位引用的文件夹就是真实目录：模型能在那里列出 `.git`。
 
-三条路由都先询问 Host 的准入检查，每次请求时经 `ctx.get('connection')?.requestRejection(req)` 读取：从 0.1.2 起（该服务出现于 0.1.2-alpha.2）它是 harness 的 Host/Origin 围栏加登录 cookie 鉴权，未鉴权的调用方在读写任何东西之前就收到 401。0.1.0 与 0.1.1 没有该服务，检查一律放行。其后是 CSRF 闸门：stage 要求非简单请求头（名称头，文件夹文件则是批次头），resolve 和 batch 要求 `application/json` 请求体，三者都拒绝非同源 Fetch Metadata（缺失时放行——桌面转发器会剥掉它），且不授予 CORS 权限。在 0.1.0–0.1.1 上这只是 CSRF 防护，不是鉴权：保持 DSH 仅监听本机或置于认证访问之后；同源插件和受信任本地客户端仍具有宿主权限。
+三条路由都先询问 Host 的准入检查，每次请求时经 `ctx.get('connection')?.requestRejection(req)` 读取：从 0.1.2 起（该服务出现于 0.1.2-alpha.2）它是 harness 的 Host/Origin 围栏加登录 cookie 鉴权，未鉴权的调用方在读写任何东西之前就收到 401。0.1.0 与 0.1.1 发布的该服务没有检查，一律放行。`connection` 服务不在时——启动时其异步 `apply` 尚未完成、改配置后重启、激活失败——所有序列都回 503 而不是放行：在 0.1.2 及之后，这正是 harness 自己的 `/api` 也关着的时刻；在 0.1.0–0.1.1 上该服务与 Web 服务器同时就绪。其后是 CSRF 闸门：stage 要求非简单请求头（名称头，文件夹文件则是批次头），resolve 和 batch 要求 `application/json` 请求体，三者都拒绝非同源 Fetch Metadata（缺失时放行——桌面转发器会剥掉它），且不授予 CORS 权限。在 0.1.0–0.1.1 上这只是 CSRF 防护，不是鉴权：保持 DSH 仅监听本机或置于认证访问之后；同源插件和受信任本地客户端仍具有宿主权限。
 
 禁止在新标签导航拖入文件的 blob URL：SVG 在 img 中安全不代表顶层文档安全。HTML/XML 只显示转义源码；PDF 即使收到 HTML MIME 也强制 application/pdf。浏览器不一定支持所有编解码器/PDF。不会自动执行或解压文件。清理会删除 DSH_HOME/drops 下过期日期目录，目录内手工放的东西也会一起删除。
 

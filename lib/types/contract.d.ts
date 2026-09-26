@@ -269,7 +269,7 @@ export interface StageOk {
 /** Refused staging answer. */
 export interface StageErr {
     /** Machine-readable reason. */
-    error: 'method' | 'forbidden' | 'unauthorized' | 'too-large' | 'write-failed' | 'no-match' | 'too-many' | 'too-deep' | 'unknown-batch' | 'unsafe-path' | 'bad-request' | 'busy' | 'empty';
+    error: 'method' | 'forbidden' | 'unauthorized' | 'unavailable' | 'too-large' | 'write-failed' | 'no-match' | 'too-many' | 'too-deep' | 'unknown-batch' | 'unsafe-path' | 'bad-request' | 'busy' | 'empty';
     /** For a folder refused over a limit: which one. */
     limit?: FolderLimit | undefined;
 }

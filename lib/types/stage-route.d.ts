@@ -25,7 +25,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
  * otherwise open to any local caller. 0.1.0 and 0.1.1 have no such check, and
  * the callback answers undefined there.
  * @param req - the request.
- * @returns 401 or 403 to refuse, undefined to admit.
+ * @returns 401 or 403 to refuse, 503 while the check itself is unavailable,
+ *   undefined to admit.
  */
 export type RequestRejection = (req: IncomingMessage) => number | undefined;
 /**

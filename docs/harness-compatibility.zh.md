@@ -78,7 +78,7 @@ Host peer 对每个支持的元组各用一个带预发布标记的比较器：`
 4. **输入框。** 自 0.1.2 起输入框是 Lexical `contenteditable`，不再是 `<textarea>`，以 textarea 为条件的 Enter 拦截从不触发，消息会不带暂存文件发出。0.1.7 新增 `inputActions.captureInsertion()` / `insertText(text, span)`；发送拦截借它追加引用（0.1.2–0.1.6 用作用域事件 `slash/input-insert-text`），再交给输入框自己的处理器提交。同一类名在 Web 产物与桌面应用中不同（`uV2eYG_primary` / `QJwAZG_primary`），因此发送与停止按钮按结构识别。
 5. **席位 props。** `attachments` 是 `image` 与 `file` 草稿的联合，旁边还有 `uploads`、`onRetryFile`、`canAcceptDrop`、`dropLimits`（多数自 0.1.3 起）。附件栏全部渲染，并遵守 `canAcceptDrop`。
 6. **桌面路径。** 桌面 preload 发布 `globalThis.__DSH_HOST_PATHS__.pathFor(file)`；它没有声明文件，因此按特性检测。
-7. **路由鉴权。** `connection.requestRejection(req)` 让原始 Web 路由复用 harness 自身的鉴权——它自 0.1.2-alpha.2 起就存在，启动冒烟在 0.1.2 及之后的每个序列上都看到匿名调用被拒绝；该服务存在时三条路由（stage、resolve 与文件夹 batch 路由）都会调用。客户端请求改为相对文档，因为桌面页面是 `dsh-app://app/`，其转发器会剥掉 `Origin` 与 `Sec-Fetch-Site`。
+7. **路由鉴权。** `connection.requestRejection(req)` 让原始 Web 路由复用 harness 自身的鉴权——它自 0.1.2-alpha.2 起就存在，启动冒烟在 0.1.2 及之后的每个序列上都看到匿名调用被拒绝；该服务存在时三条路由（stage、resolve 与文件夹 batch 路由）都会调用，`connection` 服务不在时（它异步提供，改配置时会重启）回 503。客户端请求改为相对文档，因为桌面页面是 `dsh-app://app/`，其转发器会剥掉 `Origin` 与 `Sec-Fetch-Site`。
 8. **设置。** `ctx.settings` 变成 `SettingsForms`：`installSection` 与 `register` 都不存在了；表单按 profile 条目（`drop`）由导出的 `Config` 生成，且只包含标记为 volatile 的字段；一次性的 `settings.yaml` 导入按条目 id 对应段名——`crosery-drop` 不会被迁移。
 9. **引用芯片。** `data-decoration="chip"` 与 `data-ref-chip` 只存在于 textarea 序列；reference-fit 样式表只在附件栏发现 textarea 输入框时才安装。
 
