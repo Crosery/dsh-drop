@@ -229,7 +229,12 @@ describe('folder batch', () => {
       duplex: 'half',
     } as RequestInit)
     push!(new TextEncoder().encode('first half'))
-    await new Promise((done) => setTimeout(done, 50))
+    // Wait until the Host is writing the part, not for a fixed time.
+    const parts = join(root, DAY, `.batch-${id}`, 'parts')
+    for (const deadline = Date.now() + 5000; Date.now() < deadline;) {
+      if ((await readdir(parts).catch(() => [])).length > 0) break
+      await new Promise((done) => setTimeout(done, 10))
+    }
     // Busy while the file streams: a commit now would publish a half folder.
     assert.equal((await commit(id)).status, 409)
     assert.equal((await control({ op: 'abort', id })).status, 200)

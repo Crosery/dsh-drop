@@ -164,12 +164,16 @@ describe('acquireFolder', () => {
       return http(url, init)
     }
     await assert.rejects(acquireFolder(project(), 'proj', [], controller.signal, () => {}, slow))
-    // The abort control request is fire-and-forget; give it a moment.
-    await new Promise((done) => setTimeout(done, 100))
-    assert.equal(store.open(), 0, 'the Host dropped the batch')
+    // The abort control request is fire-and-forget: wait for the Host to act
+    // on it rather than for a fixed time, which a loaded machine outlasts.
     const day = (await readdir(join(root, 'drops'))).find((name) => /^\d{4}-/.test(name))!
-    const left = (await readdir(join(root, 'drops', day))).filter((name) => name.startsWith('.batch-'))
-    assert.deepEqual(left, [])
+    const leftovers = async () => (await readdir(join(root, 'drops', day))).filter((name) => name.startsWith('.batch-'))
+    for (const deadline = Date.now() + 5000; Date.now() < deadline;) {
+      if (store.open() === 0 && (await leftovers()).length === 0) break
+      await new Promise((done) => setTimeout(done, 20))
+    }
+    assert.equal(store.open(), 0, 'the Host dropped the batch')
+    assert.deepEqual(await leftovers(), [])
   })
 
   it('surfaces a Host that refuses to begin', async () => {
