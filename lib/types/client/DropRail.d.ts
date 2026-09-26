@@ -26,20 +26,22 @@
  * The rail also registers itself with the plugin, per mount: the drop, paste
  * and send listeners find the composer a gesture belongs to through that
  * registration, because the page can hold more than one composer.
+ *
+ * On the trains without the seat the same component renders from the dock row
+ * above the card (`DockRail` supplies the seat's share); only how a mount
+ * finds its composer changes with the placement.
  * @module @crosery/dsh-drop/client/DropRail
  */
 import type { ReactNode } from 'react';
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots';
 import type { AttachedFile } from './attached.ts';
+import type { DropLimits } from './early-composer.ts';
 import { type ComposerFace, type ScopeLike } from './composer-face.ts';
 import { DROP_NS } from './locales.ts';
 import type { DropAsset } from './preview-store.ts';
 import type { RailRecord } from './registry.ts';
-/** The composer limits the seat publishes for its drop invitation. */
-export interface DropLimits {
-    readonly count: number;
-    readonly size: string;
-}
+import { type RailPlacement } from './rail-seats.ts';
+export type { DropLimits } from './early-composer.ts';
 /** One mounted rail, as the drop, paste and send listeners reach it. */
 export interface RailHandle extends RailRecord {
     /** The composer's image limits, when published. */
@@ -106,6 +108,12 @@ export interface DropRailInjected {
     };
     /** Unstage one file. */
     detach: (id: number) => void;
+    /**
+     * Where this mount sits: inside the composer card in the attachment seat
+     * (the default), or in the dock row above it on the trains without that
+     * seat. Only how the mount finds its composer depends on it.
+     */
+    placement?: RailPlacement | undefined;
 }
 /**
  * One draft attachment, as the seat hands it over.

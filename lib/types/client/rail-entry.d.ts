@@ -17,11 +17,17 @@
  * the owner props, and the shipped entry's document-level drop handling goes
  * away with it, so the drop pipeline feeds images back through the seat's own
  * intake. Each mounted rail registers with the {@link RailRegistry} for that.
+ *
+ * The trains before 0.1.0-rc.8 have no such seat. There the rail takes a row
+ * in `conversation.input.dock` above the composer card instead (`DockRail`),
+ * and which of the two renders is decided by the declarations themselves
+ * (`rail-seats.ts`), so a page never shows two.
  * @module @crosery/dsh-drop/client/rail-entry
  */
 import type { Context as ClientContext } from '@deepseek-ai/cordis';
 import type { AttachedFiles } from './attached.ts';
 import { type RailHandle, type SessionAccess } from './DropRail.tsx';
+import type { DraftImages, ImageLimits, ImageRefusal } from './early-composer.ts';
 import type { PreviewStore } from './preview-store.ts';
 import type { RailRegistry } from './registry.ts';
 /** What the rail registration is built from. */
@@ -34,8 +40,12 @@ export interface RailDeps {
     registry: RailRegistry<RailHandle>;
     /** The session services the send path reads through. */
     access: SessionAccess;
-    /** Called when a rail finds itself in a textarea composer (0.1.0–0.1.1). */
+    /** Called when a rail finds itself in a textarea composer (0.1.1 and earlier). */
     onLegacyComposer: () => void;
+    /** The conversation service's draft images, for the dock rail's image intake. */
+    images: DraftImages<File>;
+    /** Say why dropped images were refused (dock rail only). */
+    refuseImages: (sessionId: string, reason: ImageRefusal, limits: ImageLimits | undefined) => void;
 }
 /**
  * Mount the attachment rail for the plugin's lifetime.

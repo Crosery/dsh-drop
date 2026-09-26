@@ -9,6 +9,7 @@
  * @module @crosery/dsh-drop/client/messages
  */
 import type { FolderLimit, FolderLimits } from '../contract.ts';
+import type { ImageLimits, ImageRefusal } from './early-composer.ts';
 /** The message set one locale supplies. */
 export interface Messages {
     /** Some files could not be staged; the rest were. */
@@ -27,6 +28,12 @@ export interface Messages {
     waiting: (count: number) => string;
     /** The staged mentions could not be added to the outgoing message. */
     attachFailed: string;
+    /**
+     * Dropped images the composer's limits refused. Raised only on the early
+     * trains, where this plugin runs the composer's checks itself; the wording
+     * is the composer's own.
+     */
+    imageRefused: (reason: ImageRefusal, limits: ImageLimits | undefined) => string;
     /** Overlay: the invitation. */
     overlayTitle: string;
     /** Overlay: what happens to each kind of file. */

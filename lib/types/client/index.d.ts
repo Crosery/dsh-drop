@@ -5,8 +5,11 @@
  * This plugin occupies the composer's attachment seat, which took the shipped
  * entry's drop listeners down with it, so its own listeners are the only ones
  * left. They sit on `document` in CAPTURE phase and stop the transfer there.
- * Each transfer is routed to the composer it landed on (the page can hold
- * more than one) and split:
+ * The trains without that seat (0.1.0-rc.7 and earlier) keep the composer's
+ * own image-only listeners on `document` in the bubble phase; stopping the
+ * transfer in the capture phase is what keeps them from taking the images a
+ * second time and from discarding everything else. Each transfer is routed to
+ * the composer it landed on (the page can hold more than one) and split:
  *
  * - **Images** the composer encodes natively (PNG, JPEG, WebP, GIF) go to that
  *   composer's own validated intake, and become ordinary image attachments.
@@ -50,6 +53,12 @@ export { PreviewStore } from './preview-store.ts';
 export type { DropAsset } from './preview-store.ts';
 export { DropRail } from './DropRail.tsx';
 export type { DropRailInjected, DropRailProps, RailHandle, SeatAttachment, SeatUpload, SessionAccess, SessionInputLike, } from './DropRail.tsx';
+export { DockRail } from './DockRail.tsx';
+export type { DockRailInjected, DockRailProps } from './DockRail.tsx';
+export { DOCK_SLOT, REGION_SELECTOR, SEAT_SLOT, SeatWatch, wireRailSeats } from './rail-seats.ts';
+export type { RailPlacement, RailRegistrations, SlotDeclarations } from './rail-seats.ts';
+export { acceptsDrop, addToDraft, draftImageIds, dropLimitsOf, imageLimitsOf, intakeImages, } from './early-composer.ts';
+export type { DraftImage, DraftImages, DropLimits, ImageFile, ImageIntake, ImageIntakeResult, ImageLimits, ImageRefusal, } from './early-composer.ts';
 export { DropLightbox, usePreviewText } from './DropLightbox.tsx';
 export type { DropLightboxProps } from './DropLightbox.tsx';
 export { DROP_NS, en, zh } from './locales.ts';
