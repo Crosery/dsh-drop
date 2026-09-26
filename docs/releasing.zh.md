@@ -11,7 +11,7 @@
    之后 release 任务校验 `SHA256SUMS`，只要 gate 留下的任一冒烟记录指向别的字节就拒绝发布，否则用同一个文件创建发布，并把已验证的 harness 版本表放在自动生成的发布说明之前。
 4. 验证公开资产可下载，包含 cordis.patch.yml 和双半边，并能免源码构建安装——Web 上用 `dsh plugin --profile web add <url>`，桌面应用里用 **插件 → 添加插件**。
 
-固定资产名 dsh-drop.tgz：https://github.com/Crosery/dsh-drop/releases/latest/download/dsh-drop.tgz。latest 动态解析但文件名按字面取，所以文件名不带版本。需要固定版本时使用 releases/download/v0.2.0/dsh-drop.tgz。每次发布附 SHA256SUMS。当前未配置 npm 发布，不要宣传 npm 包名安装渠道。仓库提交了双半边产物且没有 prepare 脚本，git 源码安装无需 allowBuilds 授权；可复现安装仍以 tarball 为准。
+固定资产名 dsh-drop.tgz：https://github.com/Crosery/dsh-drop/releases/latest/download/dsh-drop.tgz。latest 动态解析但文件名按字面取，所以文件名不带版本。需要固定版本时使用 releases/download/v0.3.0/dsh-drop.tgz。每次发布附 SHA256SUMS。当前未配置 npm 发布，不要宣传 npm 包名安装渠道。仓库提交了双半边产物且没有 prepare 脚本，git 源码安装无需 allowBuilds 授权；可复现安装仍以 tarball 为准。
 
 门禁若在本次发版没改动的格子上失败——桌面 feed 更新了，或隔夜发布了新的 harness——这仍是真实结论：tag 的代码在那里跑不起来。先修复（按[上游兼容性](harness-compatibility.zh.md)验证后放宽范围或适配），再打新 tag；不要反复重跑直到变绿。
 

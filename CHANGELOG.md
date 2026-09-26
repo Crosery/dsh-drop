@@ -2,6 +2,16 @@
 
 > **English** · [中文](CHANGELOG.zh.md)
 
+## 0.3.0
+
+Works on every published harness version that can be installed: **0.0.1-rc.5 and 0.1.0-rc.2 – rc.7 added**. (0.0.1-rc.1 and rc.2 cannot be installed at all: a dependency they name was never published.)
+
+- **The rail on composers without an attachment seat.** Before 0.1.0-rc.8 the composer declares no `conversation.input.attachments`; it draws its own image strip inside the card. There the rail takes a row of its own directly above the composer card (`conversation.input.dock`, where the queue and todo strips live) and holds the dropped files and folders; dropped and pasted images join the composer's own image strip, after the composer's checks — type, count, size, total — with its wording. Which seat the rail takes is read from the slot declarations, never from a version, so an early harness whose dependencies resolve to 0.1.0-rc.8 packages uses the seat as usual, and a page never shows two rails.
+- **Drops on those trains work instead of being swallowed.** 0.2.0 loaded there but its rail had no seat, so every drop and file paste — images included — was stopped and answered with "Open a session before dropping files"; the composer's own image drop never ran. The capture-phase listeners now route to the dock rail, and they still keep the composer's bubble-phase image handler from taking images a second time or silently discarding other files.
+- **Sending** works as on the other textarea composers: Enter or Send rewrites the draft with the references after your words and submits it. Removing a card, previews and folder copies behave as elsewhere.
+- **Security note.** These trains, like 0.1.0–0.1.1, have no login check for plugin routes: keep DSH loopback-only or behind authenticated access.
+- Behaviour on 0.1.0-rc.8 through 0.1.7-rc.2 is unchanged.
+
 ## 0.2.0
 
 DeepSeek Harness 0.1.7 — the desktop app's runtime and npm `next` — on the Web and in the desktop app.
