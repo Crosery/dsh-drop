@@ -243,7 +243,7 @@ function laterCutoff(output, before) {
   const refused = refusedAsUnpublished(output)
   if (refused === undefined) return undefined
   const times = JSON.parse(run('npm', ['view', refused.name, 'time', '--json'], { allowFailure: true }).stdout || '{}')
-  const at = times[refused.version ?? (times[values.dsh] === undefined ? 'created' : values.dsh)]
+  const at = times[refused.version] ?? times[values.dsh] ?? times['created']
   if (typeof at !== 'string' || at <= before) return undefined
   return new Date(Date.parse(at) + 1000).toISOString()
 }
