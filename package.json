@@ -1,6 +1,6 @@
 {
   "name": "@crosery/dsh-drop",
-  "version": "0.3.0",
+  "version": "0.2.1",
   "description": "Drag and paste files and folders into DeepSeek Harness, on the web and in the desktop app, with one preview rail; file references are added when you send.",
   "keywords": [
     "dsh",

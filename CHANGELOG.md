@@ -2,7 +2,7 @@
 
 > **English** · [中文](CHANGELOG.zh.md)
 
-## 0.3.0
+## 0.2.1
 
 Works on every published harness version that can be installed: **0.0.1-rc.5 and 0.1.0-rc.2 – rc.7 added**. (0.0.1-rc.1 and rc.2 cannot be installed at all: a dependency they name was never published.)
 
