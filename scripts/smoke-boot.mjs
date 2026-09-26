@@ -74,7 +74,7 @@ import { parseArgs } from 'node:util'
 import vm from 'node:vm'
 import {
   NAME_HEADER, ROUTES,
-  classifyDiagnostics, inert, installedExports, maskTokens as mask, missingMembers, moduleTableOf,
+  absentInjects, classifyDiagnostics, inert, installedExports, maskTokens as mask, missingMembers, moduleTableOf, noOpenArgs,
 } from './smoke-lib.mjs'
 
 const { values } = parseArgs({
@@ -107,13 +107,10 @@ assert.ok(home.startsWith(realpathSync(tmpdir())) && !home.startsWith(join(homed
 const env = { ...process.env, DSH_HOME: home, DSH_TELEMETRY_DISABLED: '1', NO_COLOR: '1', FORCE_COLOR: '0' }
 const result = { plugin: `${pkg.name}@${pkg.version}`, dsh: undefined, runtime: undefined, strict: !values['accept-risk'], stages: {} }
 
-/**
- * `--no-open` where this train's `dsh web` has it. The early trains
- * (0.0.1-rc.5 - 0.1.0-rc.7) never open a browser and refuse the flag.
- */
+/** `--no-open` where this train's `dsh web` has it; see {@link noOpenArgs}. */
 function noOpenFlag(dshBin, childEnv) {
   const help = spawnSync(process.execPath, [dshBin, '--profile', 'web', '--help'], { env: childEnv, encoding: 'utf8', timeout: 60_000 })
-  return /--no-open\b/.test(`${help.stdout ?? ''}${help.stderr ?? ''}`) ? ['--no-open'] : []
+  return noOpenArgs(`${help.stdout ?? ''}${help.stderr ?? ''}`)
 }
 
 function stage(name, outcome, detail) {
@@ -421,11 +418,7 @@ try {
   const entries = new Map(graph.entries.map((e) => [e.id, e]))
   const entry = entries.get(pkg.name)
   if (entry === undefined) fail('client-graph', `${pkg.name} is not in __DSH_BOOT__ (${graph.entries.length} entries)`)
-  const absent = (pkg.dsh?.client?.inject ?? []).filter((name) => !entries.has(name))
-  // `dsh.client.inject` is informational graph metadata: a fiber waits on the
-  // services its entry injects, not on these package names. A target the train
-  // does not ship (dsh-client-ui-renderer before 0.1.0-rc.8) is reported, and
-  // the stages below decide whether the plugin still loads.
+  const absent = absentInjects(pkg.dsh?.client?.inject, entries)
   stage('client-graph', 'passed', `${graph.entries.length} entries; this plugin present${absent.length > 0 ? `; inject targets this train does not ship: ${absent.join(', ')}` : ' with its inject targets'}`)
 
   // 7. Host routes, as a page and as a stranger. Each is mounted (an unmounted
@@ -469,8 +462,8 @@ try {
 
   // 8. Browser half: the served bundle, evaluated against the shell's own
   //    module table — the specifiers a client bundle may require without a
-  //    graph row. Read from the served shell, never assumed: 0.1.1 answers 7,
-  //    0.1.7 answers 9.
+  //    graph row. Read from the served shell, never assumed: 0.0.1-rc.5 to
+  //    0.1.0-rc.7 answer 10, 0.1.0-rc.8 and 0.1.1 answer 7, 0.1.7 answers 9.
   const assets = [...html.matchAll(/<(?:script|link)\b[^>]*?\b(?:src|href)="([^"]+\.js(?:\?[^"]*)?)"/g)].map((m) => m[1])
   let table
   for (const asset of assets) {

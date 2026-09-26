@@ -128,16 +128,18 @@ export function tupleHeads(versions) {
  * admission failure rather than as silence. A version already covered by a
  * named cell in the same plan is not repeated.
  *
- * Named cells always run the boot smoke. Sweep rows run it per `smoke`:
- * `heads` (default) — the floor, the newest version of each tuple and whatever
- * desktop / latest / next / alpha resolve to; `all`; or `none`.
+ * Named cells always run the boot smoke. Sweep rows run it per `smoke`: `all`
+ * (default) — the plugin is installed into every published version and run
+ * there, which a train `@deepseek-ai/dsh` cannot be installed at skips as
+ * incomplete; `heads` — the floor, the newest version of each tuple and
+ * whatever desktop / latest / next / alpha resolve to; or `none`.
  *
  * @param {string[]} cells
  * @param {{ published: string[], sweepFrom: string, pinned?: string, resolved?: Record<string, string | undefined> }} facts
  * @param {'heads' | 'all' | 'none'} smoke
  * @returns {{ cell: string, smoke: boolean }[]}
  */
-export function planCells(cells, facts, smoke = 'heads') {
+export function planCells(cells, facts, smoke = 'all') {
   if (!['heads', 'all', 'none'].includes(smoke)) throw new Error(`unknown smoke policy ${JSON.stringify(smoke)}`)
   const rows = []
   const seen = new Set()

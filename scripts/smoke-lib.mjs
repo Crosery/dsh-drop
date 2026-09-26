@@ -35,6 +35,29 @@ export const SEED_MODULES = [
   ['cordis', '@deepseek-ai/cordis'],
 ]
 
+/**
+ * The flag that keeps `dsh web` from opening a browser, where this train's
+ * `dsh --profile web --help` lists it. The early trains (0.0.1-rc.5 to
+ * 0.1.0-rc.7) never open one and refuse the flag as unknown.
+ * @param {string} help - the help text, stdout and stderr joined.
+ */
+export function noOpenArgs(help) {
+  return /--no-open\b/.test(String(help)) ? ['--no-open'] : []
+}
+
+/**
+ * The `dsh.client.inject` targets a boot graph does not carry. Reported, never
+ * a failure: the client module system documents these edges as informational
+ * graph metadata — a fiber waits on the services its entry injects, not on
+ * package names — and `dsh-client-ui-renderer` is absent before 0.1.0-rc.8.
+ * Whether the plugin still loads is for the later stages to show.
+ * @param {string[] | undefined} inject
+ * @param {{ has: (id: string) => boolean }} entries - the graph's entry ids.
+ */
+export function absentInjects(inject, entries) {
+  return (inject ?? []).filter((name) => !entries.has(name))
+}
+
 /** A `dsh web` URL carries a one-time session token; nothing this repo prints may. */
 export function maskTokens(text) {
   return String(text).replace(/token=[\w.~%-]+/g, 'token=***')

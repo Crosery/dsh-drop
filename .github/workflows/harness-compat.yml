@@ -29,16 +29,25 @@
 #   desktop             what the desktop app ships now,  on PRs (not required),
 #                       read from both update feeds       daily, gates releases
 #   latest|next|alpha   npm dist-tags                    daily
-#   sweep               every published version from     weekly; its types, tests
-#                       the lowest the peers admit        and admission gate releases
+#   sweep               every published version, from    weekly; all four stages
+#                       the lowest the peers admit        on every row gate releases
+#                       (0.0.1-rc.1 on)
 #   desktop-bytes       the same smoke on the desktop    daily, gates releases
 #                       zip itself (macOS job below)
 #
-# A train published without a package this plugin needs — or not published on
-# npm yet — is "incomplete": neutral, it neither opens nor closes an issue. Only
-# npm's answers about the packages count (E404, ETARGET, ERESOLVE); a registry
-# that does not answer fails the cell, and pinned and floor are never
-# incomplete. Admission needs no install, so it runs on an incomplete train too.
+# Sweep rows boot the plugin on every version (`smoke: all`, the default) —
+# the plugin is installed into each published harness and run there; `heads`
+# (the newest build of each tuple and what the named cells resolve to) and
+# `none` remain for a dispatch. Matrix jobs run in parallel, so the sweep's
+# wall time is roughly its slowest cell, not the sum.
+#
+# A train whose @deepseek-ai/dsh does not install on its own (0.0.1-rc.1 and
+# rc.2: npm answers E404 for dsh-agent-tool-mode) — or not published on npm
+# yet — is "incomplete": neutral, it neither opens nor closes an issue, and the
+# step summary quotes npm's answer. Only npm's answers about the packages count
+# (E404, ETARGET, ERESOLVE); a registry that does not answer fails the cell,
+# and pinned and floor are never incomplete. Admission needs no install, so it
+# runs on an incomplete train too.
 #
 # Scheduled and dispatched runs report: a failing cell opens or comments on
 # the `upstream-drift` issue "Harness compatibility broken against @<cell>",
@@ -66,9 +75,9 @@ on:
         type: string
       smoke:
         description: 'Boot smoke for sweep rows'
-        default: heads
+        default: all
         type: choice
-        options: [heads, all, none]
+        options: [all, heads, none]
       desktop-bytes:
         description: 'Also smoke the desktop zip on macOS'
         default: true
@@ -84,7 +93,7 @@ on:
         default: 'pinned,floor'
       smoke:
         type: string
-        default: heads
+        default: all
       desktop-bytes:
         type: boolean
         default: false
@@ -131,7 +140,7 @@ jobs:
         timeout-minutes: 10
         env:
           CELLS: ${{ inputs.cells || (github.event.schedule == '43 6 * * 1' && 'sweep') || 'desktop,latest,next,alpha' }}
-          SMOKE: ${{ inputs.smoke || 'heads' }}
+          SMOKE: ${{ inputs.smoke || 'all' }}
         run: node scripts/harness-target.mjs --plan "$CELLS" --smoke "$SMOKE"
 
   against:

@@ -3,7 +3,7 @@
  * it.
  *
  *   node scripts/harness-target.mjs <cell> [--repoint] [--install] [--admits]
- *   node scripts/harness-target.mjs --plan <cell,cell,…> [--smoke heads|all|none]
+ *   node scripts/harness-target.mjs --plan <cell,cell,…> [--smoke all|heads|none]
  *   node scripts/harness-target.mjs --feed <mac-arm64|win-x64>
  *
  * Cells:
@@ -36,7 +36,8 @@
  * --admits   applies the rule dsh ≥0.1.7 applies before installing or loading
  *            a plugin (every `@deepseek-ai/dsh*` peer, prerelease-inclusive)
  *            and node-semver's default rule; both must admit the version.
- * --plan     prints the matrix (`matrix=` in $GITHUB_OUTPUT) for a cell list.
+ * --plan     prints the matrix (`matrix=` in $GITHUB_OUTPUT) for a cell list;
+ *            --smoke picks the sweep rows that boot the plugin (default all).
  * --feed     prints version / path / sha512 / size of one desktop feed.
  *
  * Writes its answers to $GITHUB_OUTPUT when set.
@@ -68,7 +69,7 @@ const { values: flags, positionals } = parseArgs({
     install: { type: 'boolean', default: false },
     admits: { type: 'boolean', default: false },
     plan: { type: 'string' },
-    smoke: { type: 'string', default: 'heads' },
+    smoke: { type: 'string', default: 'all' },
     feed: { type: 'string' },
   },
 })

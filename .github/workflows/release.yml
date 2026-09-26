@@ -4,11 +4,13 @@
 # after every local gate — with the committed lib/ checked against a scratch
 # build before anything rebuilds it in place. Nothing is attached until `gate`
 # passes: that very tarball must install, activate, answer on its routes and
-# be served on its pinned train, on the floor, and on the version the desktop
-# app ships today (as the npm Web app and as the desktop zip itself), and the
-# tag's tree must typecheck, test and be admitted on every published harness
-# version the sweep finds. `release` then attaches the same file, and refuses
-# to if any smoke the gate recorded installed different bytes.
+# be served on its pinned train, on the floor, on the version the desktop app
+# ships today (as the npm Web app and as the desktop zip itself) and on every
+# published harness version the sweep finds, where the tag's tree must also
+# typecheck, test and be admitted — a version whose @deepseek-ai/dsh cannot be
+# installed at all is reported incomplete instead. `release` then attaches the
+# same file, and refuses to if any smoke the gate recorded installed different
+# bytes.
 name: Release
 on:
   push:
@@ -80,7 +82,7 @@ jobs:
     uses: ./.github/workflows/harness-compat.yml
     with:
       cells: pinned,floor,desktop,sweep
-      smoke: none
+      smoke: all
       desktop-bytes: true
       ref: ${{ inputs.tag || github.ref }}
       tarball: release-asset
@@ -134,7 +136,7 @@ jobs:
           console.log(`Boot smoke of this release's tarball (sha256 \`${asset}\`): installed with \`dsh plugin add\` (no exemption), activated, its Host routes answered, and its browser half served.\n`)
           console.log('| cell | dsh | smoke |\n| --- | --- | --- |')
           for (const [cell, r] of rows) console.log(`| ${cell} | ${r.dsh ?? '?'} | ${r.outcome} |`)
-          console.log('\nEvery published harness version the gate swept either passed typecheck, tests and peer admission or is published incomplete upstream; the gate run lists each one.')
+          console.log('\nEvery published harness version the gate swept either passed typecheck, tests, peer admission and this boot smoke or is published incomplete upstream (its @deepseek-ai/dsh does not install); the gate run lists each one.')
           JS
           cat "$RUNNER_TEMP/notes.md" >> "$GITHUB_STEP_SUMMARY"
 

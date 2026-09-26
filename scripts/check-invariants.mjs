@@ -127,7 +127,8 @@ for (const [file, text] of [['ci.yml', ci], ['release.yml', release]]) {
 }
 assert.match(release, /gate:\s+needs: pack\b/, 'release.yml must pack before its gate')
 assert.match(release, /needs: \[pack, gate\]/, 'release.yml must wait for its gate')
-assert.match(release, /cells: pinned,floor,desktop,sweep/, 'the release gate must cover pinned, floor, desktop and the sweep')
+assert.match(release, /cells: pinned,floor,desktop,sweep\s+smoke: all\b/, 'the release gate must cover pinned, floor, desktop and the sweep, and boot the asset on every swept version')
+assert.match(compat, /SMOKE: \$\{\{ inputs\.smoke \|\| 'all' \}\}/, 'the scheduled sweep must boot the plugin on every version')
 assert.match(release, /desktop-bytes: true/, 'the release gate must smoke the desktop bytes')
 assert.match(release, /tarball: release-asset/, 'the release gate must smoke the packed asset, not a fresh pack of the tree')
 assert.match(release, /r\.sha256 !== asset/, 'the release must refuse an asset whose bytes the gate did not smoke')

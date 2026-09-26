@@ -18,7 +18,7 @@ import {
 } from '../scripts/harness-lib.mjs'
 import {
   NAME_HEADER, ROUTES,
-  classifyDiagnostics, exportedNames, inert, maskTokens, membersRead, missingMembers, moduleTableOf, onTrain, strictModule,
+  absentInjects, classifyDiagnostics, exportedNames, inert, maskTokens, membersRead, missingMembers, moduleTableOf, noOpenArgs, onTrain, strictModule,
 } from '../scripts/smoke-lib.mjs'
 import { BATCH_ROUTE, NAME_HEADER as CONTRACT_NAME_HEADER, RESOLVE_ROUTE, STAGE_ROUTE } from '../src/contract.ts'
 
@@ -76,12 +76,24 @@ test('each tuple head is its newest prerelease', () => {
   ])
 })
 
+test('the sweep boots the plugin on every published version by default, from 0.0.1-rc.1', () => {
+  const resolved = { desktop: '0.1.7-rc.2', latest: '0.1.5-rc.3', next: '0.1.7-rc.2', alpha: '0.1.7-alpha.2' }
+  const rows = planCells(['pinned', 'floor', 'desktop', 'sweep'], { published: PUBLISHED, sweepFrom: sweepStart(peers)!, pinned: '0.1.7-rc.2', resolved })
+  // Every published version is a row, once: the three named cells cover 0.1.7-rc.2 and the floor.
+  assert.deepEqual(rows.map((r) => r.cell), ['pinned', 'floor', 'desktop', ...PUBLISHED.filter((v) => v !== '0.1.7-rc.2' && v !== FLOOR)])
+  assert.ok(rows.every((r) => r.smoke), 'smoke: all is the default, for the weekly sweep and the release gate')
+  // The PR gate plans no sweep, so the smoke policy cannot widen it.
+  assert.deepEqual(planCells(['pinned', 'floor'], { published: PUBLISHED, sweepFrom: '0.0.1-rc.0' }, 'all'), [
+    { cell: 'pinned', smoke: true }, { cell: 'floor', smoke: true },
+  ])
+})
+
 test('named cells always smoke; the sweep expands to every published version from the start, once', () => {
   const resolved = { desktop: '0.1.7-rc.2', latest: '0.1.5-rc.3', next: '0.1.7-rc.2', alpha: '0.1.7-alpha.2' }
   assert.deepEqual(planCells(['pinned', 'floor'], { published: [], sweepFrom: '0.1.0-rc.8' }), [
     { cell: 'pinned', smoke: true }, { cell: 'floor', smoke: true },
   ])
-  const rows = planCells(['pinned', 'floor', 'desktop', 'sweep'], { published: PUBLISHED, sweepFrom: '0.1.0-rc.8', pinned: '0.1.7-rc.2', resolved })
+  const rows = planCells(['pinned', 'floor', 'desktop', 'sweep'], { published: PUBLISHED, sweepFrom: '0.1.0-rc.8', pinned: '0.1.7-rc.2', resolved }, 'heads')
   const exact = (cell: string) => /^\d/.test(cell)
   const swept = rows.filter((r) => exact(r.cell)).map((r) => r.cell)
   // Versions below the start are not swept; ones a named cell covers are not repeated.
@@ -92,7 +104,7 @@ test('named cells always smoke; the sweep expands to every published version fro
   // Heads of each tuple, plus what latest and alpha resolve to.
   assert.deepEqual(smoked, ['0.1.0-rc.8', '0.1.2-rc.1', '0.1.3-alpha.2', '0.1.5-rc.3', '0.1.6-alpha.2', '0.1.7-alpha.2'])
   // A tuple published tomorrow is swept today without editing anything.
-  const tomorrow = planCells(['sweep'], { published: [...PUBLISHED, '0.1.8-alpha.1'], sweepFrom: '0.1.0-rc.8' })
+  const tomorrow = planCells(['sweep'], { published: [...PUBLISHED, '0.1.8-alpha.1'], sweepFrom: '0.1.0-rc.8' }, 'heads')
   assert.deepEqual(tomorrow.at(-1), { cell: '0.1.8-alpha.1', smoke: true })
   assert.ok(planCells(['sweep'], { published: PUBLISHED, sweepFrom: '0.1.0-rc.8' }, 'none').every((r) => !r.smoke))
   assert.ok(planCells(['sweep'], { published: PUBLISHED, sweepFrom: '0.1.0-rc.8' }, 'all').every((r) => r.smoke))
@@ -273,7 +285,33 @@ test('the smoke holds only this plugin to account for boot diagnostics, and mask
 test("the shell's module table is read from its bundle", () => {
   const shell = 'var x=1;function WS(){return{react:a,"react/jsx-runtime":b,"react-dom":c,"@deepseek-ai/cordis":d,"@deepseek-ai/dsh-client-ui-dockkit":e}}'
   assert.deepEqual(moduleTableOf(shell), ['react', 'react/jsx-runtime', 'react-dom', '@deepseek-ai/cordis', '@deepseek-ai/dsh-client-ui-dockkit'])
-  assert.equal(moduleTableOf('function f(){return{a:1}}'), undefined)
+  assert.equal(moduleTableOf('function f(){return{a:1}}'), undefined)  // The literal in dsh-web-frontend 0.0.1-rc.5 to 0.1.0-rc.7 (index-DYtepzMn.js at 0.0.1-rc.5): ten specifiers.
+  const early = 'const F={react:B6,"react/jsx-runtime":Y5,"react-dom":T8,"react-dom/client":E6,"@deepseek-ai/cordis":h6,"@deepseek-ai/dsh-client-ui-slots":D6,'
+    + '"@deepseek-ai/dsh-client-web-react":g8,"@deepseek-ai/dsh-client-ui-primitives":im,"@deepseek-ai/dsh-client-ui-attachment":Im,"@deepseek-ai/dsh-client-schema-form":Zm};'
+  assert.deepEqual(moduleTableOf(early), [
+    'react', 'react/jsx-runtime', 'react-dom', 'react-dom/client', '@deepseek-ai/cordis', '@deepseek-ai/dsh-client-ui-slots',
+    '@deepseek-ai/dsh-client-web-react', '@deepseek-ai/dsh-client-ui-primitives', '@deepseek-ai/dsh-client-ui-attachment', '@deepseek-ai/dsh-client-schema-form',
+  ])
+})
+
+test('the smoke passes --no-open only where dsh web lists it, and reports an inject target a train lacks', () => {
+  // `dsh --profile web --help` on 0.0.1-rc.5 (also 0.1.0-rc.2 to rc.7): no --no-open, which it refuses as unknown.
+  const early = [
+    'Usage: dsh --profile web [options]', '', 'Serve the DeepSeek Harness browser UI.', '', 'Options:',
+    '  --host <host>                  bind host; pass 0.0.0.0 to reach it from', '  --port <port>                  listen port; pass 0 to let the OS pick a free',
+    '  -h, --help                     show this help',
+  ].join('\n')
+  assert.deepEqual(noOpenArgs(early), [])
+  // 0.1.7-rc.2's help.
+  assert.deepEqual(noOpenArgs(`${early}\n  --no-open                      do not open the Web UI in the default browser`), ['--no-open'])
+  assert.deepEqual(noOpenArgs('  --no-opener  something else'), [])
+
+  const inject = ['@deepseek-ai/dsh-client-ui-conversation', '@deepseek-ai/dsh-client-ui-input-trigger', '@deepseek-ai/dsh-client-locale', '@deepseek-ai/dsh-client-ui-renderer']
+  // 0.1.0-rc.2's boot graph: every target but the renderer, first shipped in 0.1.0-rc.8.
+  const early010 = new Set(inject.slice(0, 3))
+  assert.deepEqual(absentInjects(inject, early010), ['@deepseek-ai/dsh-client-ui-renderer'])
+  assert.deepEqual(absentInjects(inject, new Set(inject)), [])
+  assert.deepEqual(absentInjects(undefined, new Set()), [])
 })
 
 test("a bundle's reads of a renamed seed export are caught, statically and when the factory runs", () => {
