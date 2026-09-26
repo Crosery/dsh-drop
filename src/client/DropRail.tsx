@@ -46,7 +46,7 @@ import type { ReactNode } from 'react'
 // to that train, so the props this component reads are restated below instead.
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
-import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import type { InjectFace, PropsLocale, PropsRuntime, SlotMap } from '@deepseek-ai/dsh-client-ui-slots'
 import { fileNameOf, freshFiles } from '../contract.ts'
 import { dropKindOf, formatDropBytes, kindBadge, type DropKind } from '../preview.ts'
 import type { AttachedFile } from './attached.ts'
@@ -57,7 +57,7 @@ import { ChevronLeftGlyph, ChevronRightGlyph, CloseGlyph, FolderGlyph, PlayGlyph
 import { DROP_NS, type DropKey } from './locales.ts'
 import type { DropAsset } from './preview-store.ts'
 import type { RailRecord } from './registry.ts'
-import { REGION_SELECTOR, type RailPlacement } from './rail-seats.ts'
+import { REGION_SELECTOR, type RailPlacement, type SEAT_SLOT } from './rail-seats.ts'
 import { planRemovalFocus, settleRemovalFocus, type PendingFocus } from './rail-focus.ts'
 import { useRailOverflow } from './use-rail-overflow.ts'
 
@@ -225,6 +225,28 @@ export interface SeatProps {
 }
 
 /**
+ * The session-kit members this rail reads from the runtime share, restated
+ * for the trains whose SlotMap has no attachment seat to derive them from.
+ */
+interface SeatKit {
+  /** Selector hook over the session's input state. */
+  useInput: <S>(selector: (state: never) => S) => S | undefined
+  /** The session's input action face. */
+  inputActions?: unknown
+}
+
+/**
+ * The seat's runtime share on the running train's types.
+ *
+ * Trains from 0.1.0-rc.8 declare the seat, and the share comes from their
+ * SlotMap as for any slot. The earlier trains' SlotMap has no such key — their
+ * composer has no seat, and the rail renders from the dock (`DockRail`) — so
+ * the members the rail reads are taken from {@link SeatKit} there instead.
+ * @typeParam K - the seat's key.
+ */
+type SeatRuntime<K extends string> = K extends keyof SlotMap & string ? PropsRuntime<K> : SeatKit
+
+/**
  * Full rail props: the seat's share, this plugin's injected face, and the
  * locale seat.
  *
@@ -233,7 +255,7 @@ export interface SeatProps {
  * framework synthesizes from the injected `hooks` compartment.
  */
 export type DropRailProps =
-  Omit<PropsRuntime<'conversation.input.attachments'>, keyof SeatProps>
+  Omit<SeatRuntime<typeof SEAT_SLOT>, keyof SeatProps>
   & SeatProps
   & InjectFace<DropRailInjected>
   & PropsLocale<typeof DROP_NS>

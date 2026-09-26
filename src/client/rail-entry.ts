@@ -26,6 +26,7 @@
  */
 
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
+import type { ReactNode } from 'react'
 // Type-only: the SlotMap seat, the standard-prop kits, and the locale service.
 // `dsh-client-ui-renderer` owns the slot registry declaration from 0.1.2;
 // `dsh-client-runtime` published it up to 0.1.1 and stopped shipping, so
@@ -33,6 +34,7 @@ import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type { SlotMap } from '@deepseek-ai/dsh-client-ui-slots'
 import type { AttachedFile, AttachedFiles } from './attached.ts'
 import { DockRail } from './DockRail.tsx'
 import { DropRail, type RailHandle, type SessionAccess } from './DropRail.tsx'
@@ -40,7 +42,7 @@ import type { DraftImages, ImageLimits, ImageRefusal } from './early-composer.ts
 import { DROP_NS, en, zh } from './locales.ts'
 import type { PreviewStore } from './preview-store.ts'
 import type { RailRegistry } from './registry.ts'
-import { SeatWatch, wireRailSeats } from './rail-seats.ts'
+import { SEAT_SLOT, SeatWatch, wireRailSeats } from './rail-seats.ts'
 
 /**
  * Shadowing rank for the attachment seat.
@@ -63,6 +65,22 @@ const DOCK_ORDER = 30
 
 /** The no-session snapshot; shared so its identity is stable across reads. */
 const EMPTY: readonly AttachedFile[] = Object.freeze([])
+
+/** A slot registry typed loosely, for a key the running train does not declare. */
+interface UndeclaredSlotRegistry {
+  register(options: { name: string } & Record<string, unknown>, component: (props: never) => ReactNode): () => void
+}
+
+/**
+ * The registry the seat registration is typed through.
+ *
+ * From 0.1.0-rc.8 the train's SlotMap declares the seat, and the registration
+ * is checked against the seat's composed props like any other. The earlier
+ * trains' SlotMap has no such key, so there the same call goes through a loose
+ * face; at runtime it never runs, because the seat is never declared.
+ * @typeParam R - the running train's slot registry.
+ */
+type SeatRegistry<R> = typeof SEAT_SLOT extends keyof SlotMap ? R : UndeclaredSlotRegistry
 
 /** What the rail registration is built from. */
 export interface RailDeps {
@@ -122,8 +140,8 @@ export function installPreviewRail(ctx: ClientContext, deps: RailDeps): void {
       '@crosery/dsh-drop: rail dictionaries',
     )
     wireRailSeats(scoped.slots, seat, {
-      seat: () => scoped.slots.register({
-        name: 'conversation.input.attachments',
+      seat: () => (scoped.slots as unknown as SeatRegistry<typeof scoped.slots>).register({
+        name: SEAT_SLOT,
         priority: RAIL_PRIORITY,
         locale: DROP_NS,
         // The staged list rides the `hooks` compartment, not a plain value: the
@@ -136,7 +154,7 @@ export function installPreviewRail(ctx: ClientContext, deps: RailDeps): void {
         // session of this occurrence, `undefined` on a blank composer. Each
         // composer on the page gets its own occurrence, so a second composer
         // (the subagent sidebar) gets its own session here too.
-        inject: (sessionId) => ({
+        inject: (sessionId: string | undefined) => ({
           ...shared,
           sessionId,
           hooks: hooksFor(sessionId),

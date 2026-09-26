@@ -65,14 +65,20 @@ export declare class SeatWatch {
     subscribe(listener: () => void): () => void;
     private changed;
 }
-/** The slot service's declaration hook, as far as this wiring uses it. */
+/**
+ * The slot service's declaration hook, as far as this wiring uses it.
+ *
+ * The key is a plain string: the early trains' SlotMap has no key for the
+ * seat, and waiting on a slot that is never declared is exactly the answer
+ * wanted there.
+ */
 export interface SlotDeclarations {
     /**
      * Run `callback` for each lifetime of a slot's declaration: at once when it
      * is declared, otherwise when it gets declared; its disposer runs when the
      * declaration goes.
      */
-    inject(key: typeof SEAT_SLOT | typeof DOCK_SLOT, callback: () => () => void): () => void;
+    inject(key: string, callback: () => () => void): () => void;
 }
 /** The two registrations, each answering its disposer. */
 export interface RailRegistrations {

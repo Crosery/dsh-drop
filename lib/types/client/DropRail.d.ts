@@ -33,14 +33,14 @@
  * @module @crosery/dsh-drop/client/DropRail
  */
 import type { ReactNode } from 'react';
-import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots';
+import type { InjectFace, PropsLocale, PropsRuntime, SlotMap } from '@deepseek-ai/dsh-client-ui-slots';
 import type { AttachedFile } from './attached.ts';
 import type { DropLimits } from './early-composer.ts';
 import { type ComposerFace, type ScopeLike } from './composer-face.ts';
 import { DROP_NS } from './locales.ts';
 import type { DropAsset } from './preview-store.ts';
 import type { RailRecord } from './registry.ts';
-import { type RailPlacement } from './rail-seats.ts';
+import { type RailPlacement, type SEAT_SLOT } from './rail-seats.ts';
 export type { DropLimits } from './early-composer.ts';
 /** One mounted rail, as the drop, paste and send listeners reach it. */
 export interface RailHandle extends RailRecord {
@@ -188,6 +188,26 @@ export interface SeatProps {
     }) => S) => S | undefined) | undefined;
 }
 /**
+ * The session-kit members this rail reads from the runtime share, restated
+ * for the trains whose SlotMap has no attachment seat to derive them from.
+ */
+interface SeatKit {
+    /** Selector hook over the session's input state. */
+    useInput: <S>(selector: (state: never) => S) => S | undefined;
+    /** The session's input action face. */
+    inputActions?: unknown;
+}
+/**
+ * The seat's runtime share on the running train's types.
+ *
+ * Trains from 0.1.0-rc.8 declare the seat, and the share comes from their
+ * SlotMap as for any slot. The earlier trains' SlotMap has no such key — their
+ * composer has no seat, and the rail renders from the dock (`DockRail`) — so
+ * the members the rail reads are taken from {@link SeatKit} there instead.
+ * @typeParam K - the seat's key.
+ */
+type SeatRuntime<K extends string> = K extends keyof SlotMap & string ? PropsRuntime<K> : SeatKit;
+/**
  * Full rail props: the seat's share, this plugin's injected face, and the
  * locale seat.
  *
@@ -195,7 +215,7 @@ export interface SeatProps {
  * session kit (`useInput`, `inputActions`) and the `useAttached` hook the
  * framework synthesizes from the injected `hooks` compartment.
  */
-export type DropRailProps = Omit<PropsRuntime<'conversation.input.attachments'>, keyof SeatProps> & SeatProps & InjectFace<DropRailInjected> & PropsLocale<typeof DROP_NS>;
+export type DropRailProps = Omit<SeatRuntime<typeof SEAT_SLOT>, keyof SeatProps> & SeatProps & InjectFace<DropRailInjected> & PropsLocale<typeof DROP_NS>;
 /**
  * The composer's attachment rail.
  *
