@@ -27,6 +27,6 @@ node scripts/harness-target.mjs 0.1.1-rc.2 --admits
 git checkout -- package.json package-lock.json && node scripts/smoke-boot.mjs --dsh 0.1.1-rc.2
 ~~~
 
-Never widen a peer range to make admission pass: widen only for a version whose types, tests and `smoke-boot.mjs --dsh <version> --accept-risk` already pass, and add it to the verified list in `scripts/check-invariants.mjs` and [Harness compatibility](harness-compatibility.md).
+Never widen a peer range to make admission pass: widen only for a version whose sweep row (`node scripts/sweep-trains.mjs <version>`: install, types, bundle, tests) and `smoke-boot.mjs --dsh <version> --accept-risk` already pass, and add it to `PUBLISHED_TRAINS` in `scripts/check-invariants.mjs` and to [Harness compatibility](harness-compatibility.md). The ranges admit every published version today, so the next tuple is the only widening left.
 
 CI and PR review run with read-only contents permissions on pull_request, including forks; no privileged pull_request_target execution of contributor code. The harness jobs declare `issues: write` and `actions: read` only because the reusable workflow's verdict and its `unreported` catch-all can report drift; on a pull request `report` is off, and a fork's token is read-only regardless. The deterministic reviewer is always available and needs no paid API key. Human review still checks whether the description matches code and whether previews or HTTP changes weaken the security boundary.
