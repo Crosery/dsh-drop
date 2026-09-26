@@ -95,6 +95,15 @@ function readyMentions(entries: readonly AttachedFile[]): { mentions: string[], 
   return { mentions, ids }
 }
 
+/**
+ * The textarea composer's completion menu with an option highlighted.
+ *
+ * 0.1.0–0.1.1 mark that menu only as a listbox naming its active option: the
+ * textarea's `aria-expanded` is set for the workspace picker alone, and the
+ * `data-trigger-menu` marker the Lexical path reads arrived later.
+ */
+const LEGACY_MENU_PICK = '[role="listbox"][aria-activedescendant]'
+
 /** The composer card around an element. */
 function cardOf(element: Element): Element | null {
   return element.closest('[data-composer-card]')
@@ -230,6 +239,8 @@ export function installSubmitGuard(deps: SubmitGuardDeps): () => void {
       if (card === null || target.disabled || target.readOnly) return
       if (card.querySelector('[data-composer-input]') !== null) return
       if (target.getAttribute('aria-expanded') === 'true') return
+      // Enter picks the highlighted completion instead of sending.
+      if (card.querySelector(LEGACY_MENU_PICK) !== null) return
       const composer = deps.composerAt(target)
       if (composer !== undefined && legacySend(composer)) stop(event)
       return

@@ -42,11 +42,12 @@ class FakeElement {
   getAttribute(name: string): string | null { return this.attrs[name] ?? null }
   setAttribute(name: string, value: string): void { this.attrs[name] = value }
 
-  /** Simple selectors only: a tag, or `[attr]`. */
+  /** Simple selectors only: a tag, or attribute tests like `[attr]` and `[attr="value"]`. */
   is(selector: string): boolean {
-    const attr = /^\[([\w-]+)\]$/.exec(selector)
-    if (attr !== null) return attr[1]! in this.attrs
-    return this.tag === selector
+    if (!selector.startsWith('[')) return this.tag === selector
+    const tests = [...selector.matchAll(/\[([\w-]+)(?:="([^"]*)")?\]/g)]
+    if (tests.map((test) => test[0]).join('') !== selector) return false
+    return tests.every(([, name, value]) => name! in this.attrs && (value === undefined || this.attrs[name!] === value))
   }
 
   /** One compound selector: `a, b` alternatives and `a b` descendants. */
@@ -515,6 +516,25 @@ describe('textarea composer (0.1.0–0.1.1)', () => {
 
       guard.release()
       assert.equal(listeners.size, 0, 'every listener is removed')
+    } finally { guard.release() }
+  })
+
+  it('lets Enter pick a highlighted completion instead of sending', () => {
+    // This train's menu is only a listbox in the card whose active descendant
+    // is the highlighted option; the textarea's aria-expanded stays unset.
+    const composer = new Composer()
+    composer.text = 'see @re'
+    const textarea = new FakeTextArea('textarea')
+    const menu = new FakeElement('div', { role: 'listbox', 'aria-activedescendant': 'trigger-opt-0' })
+    new FakeElement('div', { 'data-composer-card': '' }, [textarea, menu])
+    const guard = harness(composer, [ready(1, '/tmp/brief.md')])
+    try {
+      assert.equal(dispatch('keydown', textarea, {}), false)
+      assert.deepEqual(composer.sent, [])
+      assert.equal(guard.staged().length, 1)
+      delete menu.attrs['aria-activedescendant']
+      assert.equal(dispatch('keydown', textarea, {}), true, 'with nothing highlighted, Enter sends')
+      assert.deepEqual(composer.sent, ['see @re\n\n@/tmp/brief.md'])
     } finally { guard.release() }
   })
 
