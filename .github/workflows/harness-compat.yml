@@ -34,7 +34,10 @@
 #                       zip itself (macOS job below)
 #
 # A train published without a package this plugin needs — or not published on
-# npm yet — is "incomplete": neutral, it neither opens nor closes an issue.
+# npm yet — is "incomplete": neutral, it neither opens nor closes an issue. Only
+# npm's answers about the packages count (E404, ETARGET, ERESOLVE); a registry
+# that does not answer fails the cell, and pinned and floor are never
+# incomplete. Admission needs no install, so it runs on an incomplete train too.
 #
 # Scheduled and dispatched runs report: a failing cell opens or comments on
 # the `upstream-drift` issue "Harness compatibility broken against @<cell>",
@@ -141,7 +144,7 @@ jobs:
       - run: npm ci --ignore-scripts --no-audit --no-fund
 
       # Exit 3 is an incomplete train: the step passes, `incomplete` is set,
-      # and every later stage stands down.
+      # and every later stage but admission stands down.
       - name: Resolve ${{ matrix.cell }}
         id: target
         run: |
@@ -180,9 +183,12 @@ jobs:
         continue-on-error: true
         run: npm test
 
+      # Pure semver over the resolved version: it runs whenever there is one,
+      # installed or not — a new tuple the ranges refuse is drift even while
+      # npm still lacks its packages.
       - name: Peer admission
         id: admission
-        if: steps.target.outputs.incomplete != 'true' && steps.install.outputs.incomplete != 'true'
+        if: ${{ !cancelled() && steps.target.outputs.version != '' }}
         continue-on-error: true
         env:
           VERSION: ${{ steps.target.outputs.version }}

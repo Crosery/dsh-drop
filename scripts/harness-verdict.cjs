@@ -24,8 +24,8 @@
 const LABEL = 'upstream-drift'
 
 const ADVICE = {
-  resolve: 'the cell did not resolve to a published version — read the step log (a desktop feed that disagrees across platforms fails here).',
-  install: 'the repointed graph did not install, and `@deepseek-ai/dsh` at this version does install on its own — so the conflict is this repository\'s.',
+  resolve: 'the cell did not resolve to a published version — read the step log: npm\'s registry did not answer (an outage, not drift: re-run once it answers), a desktop feed disagrees across platforms, or pinned/floor lost a package they need.',
+  install: 'the repointed graph did not install. The step log ends with why: `@deepseek-ai/dsh` at this version installs on its own (the conflict is this repository\'s), or npm did not answer or timed out (an outage, not drift: re-run once it answers).',
   types: 'an upstream export was renamed or removed; the typecheck output names it.',
   tests: 'the plugin\'s own tests fail against this train\'s packages.',
   admission: 'a peer range does not admit this version, so dsh ≥0.1.7 refuses to install or load the plugin. Widen only after types, tests and `node scripts/smoke-boot.mjs --dsh <version> --accept-risk` pass.',

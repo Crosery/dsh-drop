@@ -92,9 +92,12 @@ async function sweep(version) {
 
   const target = await exec(dir, process.execPath, ['scripts/harness-target.mjs', version, '--repoint', '--install'])
   if (target.code === 3) {
+    // Exit 3 is npm's own answer about the train's packages; a registry that
+    // did not answer is exit 1 and lands below as a failure. Only a required
+    // package that did not exist yet puts a train out of scope.
     row.install = 'skipped'
     const why = /::notice[^:]*::(.*)$/m.exec(target.out)?.[1] ?? 'incomplete'
-    row.note = `${/\(predates\)|never published/.test(why) ? 'out of scope' : 'incomplete upstream'}: ${why}`.slice(0, 240)
+    row.note = `${/\(predates\)/.test(why) ? 'out of scope' : 'incomplete upstream'}: ${why}`.slice(0, 240)
     return row
   }
   if (!target.ok) {
@@ -124,7 +127,15 @@ async function sweep(version) {
   return row
 }
 
-const requested = args.length > 0 ? args : versionsOf(HARNESS)
+let requested = args
+if (requested.length === 0) {
+  try {
+    requested = versionsOf(HARNESS)
+  } catch (error) {
+    console.error(`cannot list the trains to sweep: ${error?.message ?? error}`)
+    process.exit(1)
+  }
+}
 const rows = []
 const queue = [...requested]
 await Promise.all(Array.from({ length: Math.max(1, jobs) }, async () => {

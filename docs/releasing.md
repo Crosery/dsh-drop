@@ -7,7 +7,7 @@
 3. Push a matching v-prefixed tag. The Release workflow runs its `gate` first and publishes nothing unless every part passes:
    - the **pinned**, **floor** and **desktop** cells of `harness-compat.yml` against the tag's own tree: typecheck (with the bundle's seed reads), tests, peer admission under both semver rules, and the boot smoke of the packed tarball on `@deepseek-ai/dsh` at that exact version — `desktop` is the version both desktop update feeds ship, and the npm Web app at that version;
    - **desktop-bytes**: the same smoke on macOS, on the desktop app's own runtime, after the downloaded zip matched its feed's sha512 and the bundled runtime matched the feed's version;
-   - the **sweep**: typecheck, tests and peer admission on every published `@deepseek-ai/dsh` version from the lowest the peer ranges admit, read from npm at run time. A version published incomplete upstream is neutral; any other failure blocks the release.
+   - the **sweep**: typecheck, tests and peer admission on every published `@deepseek-ai/dsh` version from the lowest the peer ranges admit, read from npm at run time. A version published incomplete upstream is neutral (its peer admission still counts); any other failure — a registry that does not answer included — blocks the release.
    Then the release job checks tag/version equality, reruns every gate, packs `dsh-drop.tgz` with `SHA256SUMS`, and creates the release with the verified harness versions prepended to the generated notes.
 4. Verify the public asset downloads, contains cordis.patch.yml plus both bundles, and installs without building source — on the Web with `dsh plugin --profile web add <url>`, and in the desktop app through **Plugins → Add plugin**.
 

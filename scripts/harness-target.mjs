@@ -36,7 +36,12 @@
  *
  * Writes its answers to $GITHUB_OUTPUT when set.
  * Exit 0 ok, 1 hard failure, 3 the train is not (yet) published in full:
- * incomplete, which CI reports as neutral — neither drift nor green.
+ * incomplete, which CI reports as neutral — neither drift nor green. Only npm's
+ * answers about the packages make a train incomplete (a package or version it
+ * reports absent, E404/ETARGET, or a graph it cannot put together, ERESOLVE);
+ * a registry that does not answer is exit 1. `pinned` and the floor are
+ * published in full, so for them every such finding is exit 1 as well.
+ * `--admits` needs no registry at all.
  */
 
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs'
@@ -46,7 +51,7 @@ import { parseArgs } from 'node:util'
 import semver from 'semver'
 import {
   DESKTOP_FEEDS, DIST_TAGS, FLOOR, HARNESS,
-  describeRefusals, harnessPeers, installTrain, parseFeed, planCells, refusals, repointManifest, run, sweepStart, tail, versionsOf, view,
+  RegistryError, describeRefusals, harnessPeers, installTrain, parseFeed, planCells, refusals, repointManifest, run, sweepStart, tail, versionsOf, view,
 } from './harness-lib.mjs'
 
 const INCOMPLETE = 3
@@ -125,8 +130,14 @@ async function plan(list) {
   if (cells.includes('sweep')) {
     // Only to recognise which sweep rows a named cell already covers and which
     // deserve a boot smoke; a cell that fails to resolve here fails in its own row.
+    // A registry that does not answer fails the plan: rows planned without it are not the sweep.
     for (const cell of new Set([...named, 'desktop', ...DIST_TAGS])) {
-      try { resolved[cell] = (await resolveCell(cell)).version } catch {}
+      try {
+        resolved[cell] = (await resolveCell(cell)).version
+      } catch (error) {
+        if (error instanceof RegistryError) throw error
+        summary(`- ${cell} did not resolve while planning (${String(error?.message ?? error).split('\n')[0]}); sweep rows are chosen for the smoke without it`)
+      }
     }
   }
   const rows = planCells(cells, {
@@ -151,18 +162,20 @@ async function target(cell) {
   // writes them; the install and admission steps add their lines under it.
   if (flags.repoint || !(flags.install || flags.admits)) summary(`### harness@${cell} → ${version} (${source})`)
 
-  // The Web app at the same version must exist, or there is nothing to test.
-  if (cell !== 'pinned' && !versionsOf(HARNESS).includes(version)) {
-    throw new Incomplete(`${HARNESS}@${version} is not on npm yet`)
-  }
+  // The pinned train installs from the lockfile and the floor is published in
+  // full: a finding that would make either one incomplete is a fault.
+  const settled = cell === 'pinned' || cell === 'floor' || version === FLOOR
+  const incomplete = (message) => (settled ? new Error(`${cell} (${version}) is published in full, so this fails rather than going neutral: ${message}`) : new Incomplete(message))
 
   let manifest = pkg
   if ((flags.repoint || flags.install) && cell !== 'pinned') {
+    // The Web app at the same version must exist, or there is nothing to install.
+    if (!versionsOf(HARNESS).includes(version)) throw incomplete(`${HARNESS}@${version} is not on npm yet`)
     const repointed = repointManifest(pkg, version)
     if (repointed.missing.length > 0) {
       const missing = repointed.missing.map((m) => `${m.name} (${m.why})`).join(', ')
       out('missing', missing)
-      throw new Incomplete(`not published at ${version}, and this plugin needs it: ${missing}`)
+      throw incomplete(`not published at ${version}, and this plugin needs it: ${missing}`)
     }
     if (repointed.kept.length > 0) summary(`- not published at ${version}, keeps this repository's pin: ${repointed.kept.join(', ')}`)
     if (repointed.added.length > 0) summary(`- added at ${version}: ${repointed.added.join(', ')}`)
@@ -186,7 +199,7 @@ async function target(cell) {
       out('via', result.via)
       summary(`- installed: ${result.via}`)
       if (!result.ok) {
-        if (result.incomplete) throw new Incomplete(`${HARNESS}@${version} does not install even on its own:\n${tail(result.output, 20)}`)
+        if (result.incomplete) throw incomplete(`${HARNESS}@${version} does not install even on its own:\n${tail(result.output, 20)}`)
         throw new Error(`install failed:\n${tail(result.output, 40)}`)
       }
     }

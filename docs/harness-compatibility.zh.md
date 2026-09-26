@@ -34,7 +34,7 @@ Host peer 对每个支持的元组各用一个带预发布标记的比较器：`
 
 `desktop-bytes` 下载 feed 指向的 mac-arm64 zip，要求其 sha512 与 feed 一致、内置的 `desktop-runtime.json` 和 `@deepseek-ai/dsh` 与 feed 版本一致，然后以应用的 Electron 可执行文件作为 Node（`ELECTRON_RUN_AS_NODE=1`）对 `Contents/Resources/app.asar/dsh` 跑同样的冒烟，PATH 上用应用自带的 pnpm。应用窗口、preload 桥（`__DSH_HOST_PATHS__`）和原生拖放不在 CI 范围内。
 
-某序列发布时缺少本插件需要的包，或 npm 上还没有，记为**不完整**：该格为中性，不开也不关 issue。定时或手动触发时，失败的格会新开（或追加评论到）`upstream-drift` issue「Harness compatibility broken against @<格>」；某格全部通过时会在该 issue 下评论并关闭它。CI 从不放宽范围，也不发布。
+某序列发布时缺少本插件需要的包，或 npm 上还没有，记为**不完整**：该格为中性，不开也不关 issue，但 admission 仍会运行——准入不需要安装，范围拒绝的版本即便 npm 上还不全也算漂移。只有 npm 对包本身的回答才会判为不完整：某个包或版本 E404、ETARGET，或依赖图 ERESOLVE，并且同版本 `@deepseek-ai/dsh` 的裸安装也以同类回答失败。registry 不应答、返回错误或超时，则判该格失败；`pinned` 与 `floor` 永远不会是不完整。定时或手动触发时，失败的格会新开（或追加评论到）`upstream-drift` issue「Harness compatibility broken against @<格>」；某格全部通过时会在该 issue 下评论并关闭它。CI 从不放宽范围，也不发布。
 
 各格与扫描安装序列的方式（`scripts/harness-lib.mjs`）：
 

@@ -7,7 +7,7 @@
  * them without a network; the npm-backed helpers below them are thin.
  */
 
-import { execFileSync, spawnSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -221,25 +221,87 @@ export function planRepoint(pkg, version, facts) {
   return { manifest, missing, kept, added }
 }
 
+/**
+ * The npm error code a failed npm command reports: the `npm error code X`
+ * line (`npm ERR! code X` before npm 9), or the `--json` error object.
+ */
+export function npmErrorCode(output) {
+  const text = String(output)
+  return /^npm (?:error|ERR!) code (\S+)/m.exec(text)?.[1] ?? /"code":\s*"([A-Za-z0-9_]+)"/.exec(text)?.[1]
+}
+
+/**
+ * npm answers that say something about a train's packages: a version it does
+ * not have (ETARGET), a package or version it does not have (E404), or a graph
+ * that cannot be put together (ERESOLVE). Only these make a train incomplete.
+ */
+export const UPSTREAM_GAPS = ['ETARGET', 'E404', 'ERESOLVE']
+
+/**
+ * The upstream gap a failed install shows, or `undefined` when it shows none:
+ * a timeout, a network error (ECONNREFUSED, ETIMEDOUT, EAI_AGAIN, …), a
+ * registry fault (E5xx) or anything unrecognised proves nothing about the
+ * train.
+ * @param {{ ok: boolean, timedOut?: boolean, output: string }} attempt
+ */
+export function upstreamGap(attempt) {
+  if (attempt.ok || attempt.timedOut) return undefined
+  const code = npmErrorCode(attempt.output)
+  return UPSTREAM_GAPS.includes(code) ? code : undefined
+}
+
 // ---------------------------------------------------------------------------
 // npm-backed helpers
 
-/** `npm view <spec> <field> --json`, or `undefined` when npm has nothing. */
+/**
+ * npm could not answer — the registry was unreachable, too slow, or failed.
+ * Never evidence about a train: whoever meets one fails loudly rather than
+ * reading the silence as "not published".
+ */
+export class RegistryError extends Error {}
+
+/** How long one `npm view` may take; tests shorten it. */
+const VIEW_TIMEOUT_MS = Number(process.env.HARNESS_NPM_VIEW_TIMEOUT_MS || 90_000)
+
+/**
+ * `npm view <spec> <field> --json`. `undefined` when npm has the package but
+ * not the field, or answers E404 (no such package, or no version matching
+ * `spec`). Anything else throws a {@link RegistryError}.
+ */
 export function view(spec, field) {
-  try {
-    const out = execFileSync('npm', ['view', spec, field, '--json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
-    return out.trim() === '' ? undefined : JSON.parse(out)
-  } catch {
-    return undefined
+  const what = `npm view ${spec} ${field}`
+  const r = spawnSync('npm', ['view', spec, field, '--json'], {
+    encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: VIEW_TIMEOUT_MS, killSignal: 'SIGKILL', maxBuffer: 64 * 1024 * 1024,
+  })
+  if (r.error?.code === 'ETIMEDOUT') throw new RegistryError(`${what}: no answer within ${VIEW_TIMEOUT_MS / 1000} s`)
+  if (r.error) throw new RegistryError(`${what} could not run: ${r.error.message}`)
+  if (r.status === 0) {
+    const out = r.stdout.trim()
+    try {
+      return out === '' ? undefined : JSON.parse(out)
+    } catch {
+      throw new RegistryError(`${what} answered something that is not JSON: ${out.slice(0, 200)}`)
+    }
   }
+  const output = `${r.stdout}${r.stderr}`
+  const code = npmErrorCode(output)
+  if (code === 'E404') return undefined
+  const summary = /"summary":\s*"([^"]*)"/.exec(output)?.[1] ?? tail(output, 1)
+  throw new RegistryError(`${what} failed (${code ?? (r.signal ? `killed by ${r.signal}` : `exit ${r.status}`)}): ${summary}`)
 }
 
 const published = new Map()
-/** Every published version of one package. */
+/**
+ * Every published version of one package; `[]` only when npm answers E404
+ * for the package itself. npm always has the harness, so an empty answer for
+ * it is a registry fault and throws.
+ */
 export function versionsOf(name) {
   if (!published.has(name)) {
     const list = view(name, 'versions')
-    published.set(name, Array.isArray(list) ? list : typeof list === 'string' ? [list] : [])
+    const versions = Array.isArray(list) ? list : typeof list === 'string' ? [list] : []
+    if (name === HARNESS && versions.length === 0) throw new RegistryError(`npm lists no version of ${HARNESS} — a registry fault, not a fact about any train`)
+    published.set(name, versions)
   }
   return published.get(name)
 }
@@ -251,10 +313,22 @@ export function absence(name, version) {
   return all.some((v) => semver.valid(v) && semver.lt(v, version)) ? 'skipped by upstream' : 'predates'
 }
 
-/** Run one command; returns `{ ok, output }` with stdout and stderr joined. */
-export function run(cwd, command, argv, extraEnv = {}) {
-  const result = spawnSync(command, argv, { cwd, encoding: 'utf8', env: { ...process.env, ...extraEnv }, maxBuffer: 64 * 1024 * 1024 })
-  return { ok: result.status === 0, output: `${result.stdout ?? ''}${result.stderr ?? ''}` }
+/**
+ * How long one install may take: npm 11 needs about ten minutes of CPU to
+ * settle the slowest peer graph (0.1.1-rc.2's), so this is not tight. Tests
+ * shorten it.
+ */
+export const INSTALL_TIMEOUT_MS = Number(process.env.HARNESS_NPM_INSTALL_TIMEOUT_MS || 15 * 60_000)
+
+/**
+ * Run one command; returns `{ ok, timedOut, output }` with stdout and stderr
+ * joined. A command still running after `timeout` ms is killed.
+ */
+export function run(cwd, command, argv, { timeout = INSTALL_TIMEOUT_MS } = {}) {
+  const result = spawnSync(command, argv, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout, killSignal: 'SIGKILL' })
+  const timedOut = result.error?.code === 'ETIMEDOUT'
+  const output = `${result.stdout ?? ''}${result.stderr ?? ''}${timedOut ? `\n${command} ${argv[0] ?? ''}: killed after ${timeout / 1000} s` : ''}`
+  return { ok: result.status === 0, timedOut, output }
 }
 
 /** Last lines of a command's combined output, for a report. */
@@ -303,9 +377,13 @@ export function bareHarnessInstalls(version, work) {
  * do. The harness never runs that graph: `@deepseek-ai/dsh` pins every package
  * exactly. So on ERESOLVE the copy is reinstalled in legacy peer mode with
  * every harness peer of the pinned packages pinned at the train's own version,
- * which is the graph a user runs. Only when a bare install of
- * `@deepseek-ai/dsh` at that version fails as well is the train reported as
- * published incomplete; a conflict this repository causes stays a failure.
+ * which is the graph a user runs.
+ *
+ * A failed install makes the train incomplete only when npm's answer is about
+ * the packages ({@link UPSTREAM_GAPS}) and a bare install of
+ * `@deepseek-ai/dsh` at that version fails with such an answer as well. A
+ * conflict this repository causes stays a failure, and so does a network
+ * error or a timeout anywhere: those prove nothing about the train.
  *
  * @returns {{ ok: boolean, incomplete: boolean, via: string, output: string, manifest: object }}
  */
@@ -319,30 +397,37 @@ export function installTrain(dir, manifest, version) {
   writeFileSync(join(dir, 'package.json'), JSON.stringify(manifest, null, 2) + '\n')
   const first = run(dir, 'npm', ['install', ...flags])
   if (first.ok) return { ok: true, incomplete: false, via: 'peer graph', output: first.output, manifest }
-  if (!/ERESOLVE/.test(first.output)) return { ok: false, incomplete: false, via: 'peer graph', output: first.output, manifest }
 
-  fresh()
-  const pinned = structuredClone(manifest)
-  // Legacy peer mode installs no peers at all, and some harness packages reach
-  // others only as peers (renderer → dsh-client-runtime on 0.1.0–0.1.1). Pin
-  // every such harness peer the train published at exactly this version.
-  for (const name of Object.keys(manifest.devDependencies).filter((n) => n.startsWith('@deepseek-ai/dsh-'))) {
-    if (manifest.devDependencies[name] !== version) continue
-    for (const peer of Object.keys(view(`${name}@${version}`, 'peerDependencies') ?? {})) {
-      if (!isHarnessPeer(peer) || peer === HARNESS || peer in pinned.devDependencies) continue
-      if (versionsOf(peer).includes(version)) pinned.devDependencies[peer] = version
+  let last = { attempt: first, via: 'peer graph', output: first.output, manifest }
+  if (upstreamGap(first) === 'ERESOLVE') {
+    fresh()
+    const pinned = structuredClone(manifest)
+    // Legacy peer mode installs no peers at all, and some harness packages reach
+    // others only as peers (renderer → dsh-client-runtime on 0.1.0–0.1.1). Pin
+    // every such harness peer the train published at exactly this version.
+    for (const name of Object.keys(manifest.devDependencies).filter((n) => n.startsWith('@deepseek-ai/dsh-'))) {
+      if (manifest.devDependencies[name] !== version) continue
+      for (const peer of Object.keys(view(`${name}@${version}`, 'peerDependencies') ?? {})) {
+        if (!isHarnessPeer(peer) || peer === HARNESS || peer in pinned.devDependencies) continue
+        if (versionsOf(peer).includes(version)) pinned.devDependencies[peer] = version
+      }
     }
+    writeFileSync(join(dir, 'package.json'), JSON.stringify(pinned, null, 2) + '\n')
+    const second = run(dir, 'npm', ['install', ...flags, '--legacy-peer-deps'])
+    const via = `legacy peers, harness peers pinned at ${version} (the peer graph hit ERESOLVE)`
+    if (second.ok) return { ok: true, incomplete: false, via, output: second.output, manifest: pinned }
+    last = { attempt: second, via, output: `${first.output}\n--- retry in legacy peer mode:\n${second.output}`, manifest: pinned }
   }
-  writeFileSync(join(dir, 'package.json'), JSON.stringify(pinned, null, 2) + '\n')
-  const second = run(dir, 'npm', ['install', ...flags, '--legacy-peer-deps'])
-  const via = `legacy peers, harness peers pinned at ${version} (the peer graph hit ERESOLVE)`
-  if (second.ok) return { ok: true, incomplete: false, via, output: second.output, manifest: pinned }
+
+  const failed = { ok: false, incomplete: false, via: last.via, manifest: last.manifest }
+  if (upstreamGap(last.attempt) === undefined) {
+    const why = last.attempt.timedOut ? 'timed out' : npmErrorCode(last.attempt.output) ?? 'no npm error code'
+    return { ...failed, output: `${last.output}\n--- ${why}: says nothing about what ${HARNESS}@${version} published, so this is a failure, not an incomplete train` }
+  }
   const bare = bareHarnessInstalls(version)
-  return {
-    ok: false,
-    incomplete: !bare.ok,
-    via,
-    output: `${first.output}\n--- retry in legacy peer mode:\n${second.output}\n--- bare ${HARNESS}@${version} ${bare.ok ? 'installs' : 'fails too'}:\n${tail(bare.output, 12)}`,
-    manifest: pinned,
-  }
+  const gap = upstreamGap(bare)
+  const verdict = bare.ok ? 'installs, so the failure is this repository\'s'
+    : gap !== undefined ? `fails too (${gap}): published incomplete`
+      : `did not answer (${bare.timedOut ? 'timed out' : npmErrorCode(bare.output) ?? 'no npm error code'}), which proves nothing`
+  return { ...failed, incomplete: gap !== undefined, output: `${last.output}\n--- bare ${HARNESS}@${version} ${verdict}:\n${tail(bare.output, 12)}` }
 }

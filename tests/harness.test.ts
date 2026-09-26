@@ -14,7 +14,7 @@ import { createRequire } from 'node:module'
 import test from 'node:test'
 import {
   FLOOR, REQUIRED, TRAIN_EXTRAS,
-  describeRefusals, harnessPeers, parseFeed, planCells, planRepoint, refusals, sweepStart, tupleHeads,
+  describeRefusals, harnessPeers, npmErrorCode, parseFeed, planCells, planRepoint, refusals, sweepStart, tupleHeads, upstreamGap,
 } from '../scripts/harness-lib.mjs'
 import {
   NAME_HEADER, ROUTES,
@@ -133,6 +133,20 @@ test('repointing keeps the pin of a package the train never published, unless th
   assert.equal(unresolved.manifest.devDependencies['@deepseek-ai/cordis'], '4.0.4')
 })
 
+test("only npm's answers about the packages count as an upstream gap", () => {
+  const failed = (output: string, timedOut = false) => ({ ok: false, timedOut, output })
+  assert.equal(npmErrorCode('npm error code ETARGET\nnpm error notarget No matching version'), 'ETARGET')
+  assert.equal(npmErrorCode('npm ERR! code ERESOLVE'), 'ERESOLVE')
+  assert.equal(npmErrorCode('{\n  "error": {\n    "code": "E404",\n    "summary": "Not Found"\n  }\n}'), 'E404')
+  assert.equal(npmErrorCode('added 12 packages'), undefined)
+  for (const code of ['ETARGET', 'E404', 'ERESOLVE']) assert.equal(upstreamGap(failed(`npm error code ${code}`)), code)
+  // A registry that does not answer, or answers with a fault, says nothing about a train.
+  for (const code of ['ECONNREFUSED', 'ETIMEDOUT', 'EAI_AGAIN', 'ECONNRESET', 'E500', 'E503']) assert.equal(upstreamGap(failed(`npm error code ${code}`)), undefined, code)
+  assert.equal(upstreamGap(failed('npm error code ETARGET', true)), undefined, 'a timed-out install proves nothing, whatever it printed')
+  assert.equal(upstreamGap(failed('npm warn ERESOLVE overriding peer dependency\nnpm error code ECONNRESET')), undefined, 'a peer warning is not the error')
+  assert.equal(upstreamGap({ ok: true, output: 'npm error code E404' }), undefined)
+})
+
 test('a desktop feed is read with its folded path and sha512', () => {
   const sha512 = `${'A'.repeat(86)}==`
   const feed = parseFeed([
@@ -218,4 +232,7 @@ test('a cell is green only when every expected stage succeeded; incomplete is ne
   assert.deepEqual([judge({ ...stages, STAGE_smoke: 'skipped', EXPECTED: expected }).green, judge({ ...stages, STAGE_smoke: 'skipped', EXPECTED: expected }).failed], [false, []])
   const incomplete = judge({ STAGE_resolve: 'success', STAGE_install: 'success', INCOMPLETE: 'true', EXPECTED: expected })
   assert.deepEqual([incomplete.incomplete, incomplete.green, incomplete.failed], [true, false, []])
+  // Admission runs on an incomplete train too, and a refusal there is drift.
+  const refusedEarly = judge({ STAGE_resolve: 'success', STAGE_install: 'skipped', STAGE_admission: 'failure', INCOMPLETE: 'true', EXPECTED: expected })
+  assert.deepEqual([refusedEarly.failed, refusedEarly.green], [['admission'], false])
 })
