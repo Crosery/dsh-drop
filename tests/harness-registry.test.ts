@@ -200,9 +200,11 @@ test('only a train npm really lacks is incomplete, and pinned and floor never ar
   assert.equal(repointed.code, 0, repointed.stdout + repointed.stderr)
   const { devDependencies } = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as Manifest
   for (const [name, spec] of Object.entries(devDependencies)) {
+    // Cordis follows the train: the mock 0.1.7-rc.2 ships 4.0.4, whatever train the input sits on.
     const expected = !name.startsWith('@deepseek-ai/') ? lock.packages[`node_modules/${name}`]!.version
-      : name.startsWith('@deepseek-ai/dsh-') && name !== '@deepseek-ai/dsh-client-runtime' ? '0.1.7-rc.2'
-        : input.devDependencies[name]
+      : name === '@deepseek-ai/cordis' ? '4.0.4'
+        : name.startsWith('@deepseek-ai/dsh-') && name !== '@deepseek-ai/dsh-client-runtime' ? '0.1.7-rc.2'
+          : input.devDependencies[name]
     assert.equal(spec, expected, name)
   }
   rmSync(join(dir, 'package-lock.json'))
