@@ -89,7 +89,7 @@ Host peer 对每个支持的元组各用一个带预发布标记的比较器：`
 1. **设置挂载搬迁。** 0.1.1 的包导出 `installSettingsSection(ctx, ns, schema, entry, hooks)` 在 0.1.2 变成服务方法 `ctx.settings.installSection(owner, ns, schema, entry, hooks)`，`settingsNamespace()` 同时被删除。`src/index.ts` 为此导出 `mountSettingsSection`：服务有 `installSection` 就用它，只有旧 `register` 就退回旧路径，两者都没有时仍以组装入口为唯一来源。静态 import 已删除的导出不是降级而是致命：ESM 在任何代码执行前解析具名导出，0.1.2 及之后整个 Host 入口直接加载失败。
 2. **客户端服务搬迁。** `ctx.slots` 在 0.1.1 由 `@deepseek-ai/dsh-client-runtime` 声明，0.1.2 改由 `@deepseek-ai/dsh-client-ui-renderer` 声明；`ctx.sessions` 迁到 `@deepseek-ai/dsh-api-session-controller`，且 0.1.1 的原属包已停止发布。因此 client 半边用 `ctx.get` 按名读取 `sessions`，并把实际调用的切片结构化声明，任何 import 都不再点名某一序列的包。
 
-还有三处小改名由同一姿势吸收：草稿附件新增无 `previewUrl` 的 file 成员（DropRail 对其渲染身份行）、席位 owner 动词改为 `onAddFiles` / `onRemoveAttachment`（rail 用收到的哪套名字就调哪套）、`sessionId` 不再作为标准 prop 下发（改由注册的 `inject` 工厂提供）。
+较小的改动也由同一姿势吸收：0.1.2 起 `sessionId` 不再作为标准 prop 下发（改由注册的 `inject` 工厂提供）；0.1.3-alpha.2 起草稿附件新增无 `previewUrl` 的 file 成员（DropRail 对其渲染身份行），席位 owner 动词改为 `onAddFiles` / `onRemoveAttachment`（rail 用收到的哪套名字就调哪套）。
 
 ## 类型解析依赖 `@deepseek-ai/dsh-client-store`
 

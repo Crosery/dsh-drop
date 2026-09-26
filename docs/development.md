@@ -16,7 +16,7 @@ Keep transfer planning, filename reduction, mention spelling, send decisions and
 
 ## State and lifecycle
 
-Paths stay outside the draft until submission; user text precedes mentions so titles remain readable. Native PNG/JPEG/WebP/GIF go through the seat's own file intake (`onAddFiles`, or `onAddImages` on 0.1.1), minus files the seat already holds (same name, size and mtime), and the host's existing validation. Pending non-image references and preview bytes are page-local: refresh or unload loses unsent entries. A send the composer refuses leaves the entries staged; a send that fails after acceptance is restored by the composer with the mentions in its text, so the entries are not re-staged.
+Paths stay outside the draft until submission; user text precedes mentions so titles remain readable. Native PNG/JPEG/WebP/GIF go through the seat's own file intake (`onAddFiles`, or `onAddImages` up to 0.1.2), minus files the seat already holds (same name, size and mtime), and the host's existing validation. Pending non-image references and preview bytes are page-local: refresh or unload loses unsent entries. A send the composer refuses leaves the entries staged; a send that fails after acceptance is restored by the composer with the mentions in its text, so the entries are not re-staged.
 
 Paste takes the files and keeps genuine text: `text/plain` is dropped only when it merely restates the pasted file names (a Finder or Explorer copy); otherwise it is inserted over the selection (`inputActions.insertText` on 0.1.7, the browser's text insertion before). A paste aimed at some other plugin's field is left alone.
 

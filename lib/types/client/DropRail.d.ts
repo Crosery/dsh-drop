@@ -117,7 +117,7 @@ export interface DropRailInjected {
 export interface SeatAttachment {
     /** Draft identity, for the owner's remove and retry verbs. */
     id: string;
-    /** `image` or `file` from 0.1.2; absent on the image-only trains. */
+    /** `image`, or `file` from 0.1.3-alpha.2; absent on trains that predate the field. */
     kind?: string | undefined;
     /** The browser `File` behind the draft. */
     file: File;
@@ -139,22 +139,23 @@ export type SeatUpload = {
  * The seat's owner share plus the session-kit members this rail reads.
  *
  * Restated rather than imported, because the seat's props moved between
- * trains: `onAddImages` → `onAddFiles`, `onRemoveImage` →
- * `onRemoveAttachment`, and 0.1.3 added `uploads` / `onRetryFile` /
- * `dropLimits`. Every train-dependent member is optional and the rail calls
- * whichever the running harness supplies — one registration, every train.
+ * trains: 0.1.3-alpha.2 renamed `onAddImages` → `onAddFiles` and
+ * `onRemoveImage` → `onRemoveAttachment`, and added file drafts with
+ * `uploads` / `onRetryFile`. Every train-dependent member is optional and the
+ * rail calls whichever the running harness supplies — one registration,
+ * every train.
  */
 export interface SeatProps {
     /** Browser-owned draft attachments in input order. */
     attachments: readonly SeatAttachment[];
     /** Whether the composer takes a drop now; absent means it always does. */
     canAcceptDrop?: boolean | undefined;
-    /** Add one dropped batch through the composer's validation path (≤0.1.1 name). */
+    /** Add one dropped batch through the composer's validation path (name up to 0.1.2). */
     onAddImages?: ((files: readonly File[]) => void) | undefined;
-    /** Add one dropped batch through the composer's validation path (≥0.1.2 name). */
+    /** Add one dropped batch through the composer's validation path (name from 0.1.3-alpha.2). */
     onAddFiles?: ((files: readonly File[]) => void) | undefined;
     /**
-     * Remove one draft attachment through the service (≤0.1.1 name).
+     * Remove one draft attachment through the service (name up to 0.1.2).
      *
      * Method shorthand is load-bearing: the id is branded by the conversation
      * package (`DraftAttachmentId`), and the brand's symbol is not importable
@@ -162,11 +163,11 @@ export interface SeatProps {
      * the owner's branded parameter still satisfies this plain-string one.
      */
     onRemoveImage?(id: string): void;
-    /** Remove one draft attachment through the service (≥0.1.2 name). */
+    /** Remove one draft attachment through the service (name from 0.1.3-alpha.2). */
     onRemoveAttachment?(id: string): void;
-    /** Upload state per file draft (0.1.3 onward). */
+    /** Upload state per file draft (0.1.3-alpha.2 onward). */
     uploads?: Readonly<Record<string, SeatUpload>> | undefined;
-    /** Restart one failed file upload (0.1.3 onward). */
+    /** Restart one failed file upload (0.1.3-alpha.2 onward). */
     onRetryFile?(id: string): void;
     /** Display-ready image limits for the drop invitation. */
     dropLimits?: DropLimits | undefined;

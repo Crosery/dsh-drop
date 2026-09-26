@@ -20,7 +20,7 @@
 
 ## 0.1.3
 
-- 修复附件栏 `useMemo` 的依赖列表：图片行闭包引用的是解析后的删除动词，只提供 `onRemoveAttachment` 的序列（0.1.2 及之后，此时 `onRemoveImage` 恒为 undefined）可能在跨渲染时保留旧处理器。
+- 修复附件栏 `useMemo` 的依赖列表：图片行闭包引用的是解析后的删除动词，只提供 `onRemoveAttachment` 的序列（0.1.3-alpha.2 及之后，此时 `onRemoveImage` 恒为 undefined）可能在跨渲染时保留旧处理器。
 - 移除 `>=0.1.0-rc.1 <0.1.1-0` 这条 peer 分支：它是沿用而非验证得来，且接纳了本仓库文档明确不支持的 0.1.0-rc 序列；范围现在从 README 所述 0.1.1 地板开始。
 - `npm run check` 现在逐项校验文档所列序列落在 peer 范围内，并拒绝地板以下的序列，prose 与清单不会再各说各话。
 - 固定安装示例指向当前发布版本。

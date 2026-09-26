@@ -20,7 +20,7 @@ DeepSeek Harness 0.1.7 — the desktop app's runtime and npm `next` — on the W
 
 ## 0.1.3
 
-- Fix the rail's `useMemo` dependency list: the image rows close over the resolved remove verb, so a train that supplies only `onRemoveAttachment` (0.1.2 and later, where `onRemoveImage` is always absent) could keep a stale handler across renders.
+- Fix the rail's `useMemo` dependency list: the image rows close over the resolved remove verb, so a train that supplies only `onRemoveAttachment` (0.1.3-alpha.2 and later, where `onRemoveImage` is always absent) could keep a stale handler across renders.
 - Drop the `>=0.1.0-rc.1 <0.1.1-0` peer branch. It was inherited rather than verified and admitted the 0.1.0-rc trains this repository documents as unsupported; the range now starts at the 0.1.1 floor the README states.
 - `npm run check` now asserts every documented train against the peer ranges and that nothing below the floor is admitted, so the prose and the manifest cannot drift apart again.
 - Point the pinned-install examples at the current release.
