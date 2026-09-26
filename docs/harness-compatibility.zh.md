@@ -34,7 +34,7 @@ Host peer 对每个支持的元组各用一个带预发布标记的比较器：`
 
 `desktop-bytes` 下载 feed 指向的 mac-arm64 zip，要求其 sha512 与 feed 一致、内置的 `desktop-runtime.json` 和 `@deepseek-ai/dsh` 与 feed 版本一致，然后以应用的 Electron 可执行文件作为 Node（`ELECTRON_RUN_AS_NODE=1`）对 `Contents/Resources/app.asar/dsh` 跑同样的冒烟，PATH 上用应用自带的 pnpm。应用窗口、preload 桥（`__DSH_HOST_PATHS__`）和原生拖放不在 CI 范围内。
 
-某序列发布时缺少本插件需要的包，或 npm 上还没有，记为**不完整**：该格为中性，不开也不关 issue，但 admission 仍会运行——准入不需要安装，范围拒绝的版本即便 npm 上还不全也算漂移。只有 npm 对包本身的回答才会判为不完整：某个包或版本 E404、ETARGET，或依赖图 ERESOLVE，并且同版本 `@deepseek-ai/dsh` 的裸安装也以同类回答失败。registry 不应答、返回错误或超时，则判该格失败；`pinned` 与 `floor` 永远不会是不完整。定时或手动触发时，失败的格会新开（或追加评论到）`upstream-drift` issue「Harness compatibility broken against @<格>」；某格全部通过时会在该 issue 下评论并关闭它。每种失败都会走到这个判定：每一步都有自己的超时，job 的超时是它们之和再加余量，所以卡住的步骤以它自己的名义失败；运行未被取消而某一项被中断，算作失败（只有有人取消了整次运行时才什么都不报）；四项之外的步骤——checkout、Node、`npm ci`、缓存、产物上传——失败时，该格以 `job` 失败；格列表展不开时以 `harness@plan` 上报。CI 从不放宽范围，也不发布。
+某序列发布时缺少本插件需要的包，或 npm 上还没有，记为**不完整**：该格为中性，不开也不关 issue，但 admission 仍会运行——准入不需要安装，范围拒绝的版本即便 npm 上还不全也算漂移。只有 npm 对包本身的回答才会判为不完整：某个包或版本 E404、ETARGET，或依赖图 ERESOLVE，并且同版本 `@deepseek-ai/dsh` 的裸安装也以同类回答失败。registry 不应答、返回错误或超时，则判该格失败；`pinned` 与 `floor` 永远不会是不完整。定时或手动触发时，失败的格会新开（或追加评论到）`upstream-drift` issue「Harness compatibility broken against @<格>」；某格全部通过时会在该 issue 下评论并关闭它。每种失败都会走到这个判定：每一步都有自己的超时，job 的超时是它们之和再加余量，所以卡住的步骤以它自己的名义失败；运行未被取消而某一项被中断，算作失败（只有有人取消了整次运行时才什么都不报）；四项之外的步骤——checkout、Node、`npm ci`、缓存、产物上传——失败时，该格以 `job` 失败。仍然绕过判定的情形——判定脚本还没 checkout 出来 checkout 就失败了、判定本身失败、job 超时、格列表始终没展开——由 `unreported` 任务按本次运行自己的 job 列表补报，已在 issue 中提到本次运行的 job 不重复上报；格列表恢复展开时会关闭「Harness compatibility run could not plan its cells」。CI 从不放宽范围，也不发布。
 
 各格与扫描安装序列的方式（`scripts/harness-lib.mjs`）：
 

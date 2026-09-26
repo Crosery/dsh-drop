@@ -29,4 +29,4 @@ git checkout -- package.json package-lock.json && node scripts/smoke-boot.mjs --
 
 不要为了让 admission 通过而放宽 peer 范围：只有某版本的类型检查、测试和 `smoke-boot.mjs --dsh <版本> --accept-risk` 都已通过，才放宽到该版本，并同时写进 `scripts/check-invariants.mjs` 的已验证列表和[上游兼容性](harness-compatibility.zh.md)。
 
-CI 和 PR review 使用 pull_request 和只读 contents 权限，包括 fork；不以 pull_request_target 特权执行贡献者代码。harness 任务声明 `issues: write` 只是因为可复用工作流的结论步骤能上报漂移；PR 上 `report` 关闭，fork 的 token 无论如何都是只读。确定性评审无需付费 API key。人工仍需检查描述与代码是否一致，以及预览/HTTP 修改是否削弱安全边界。
+CI 和 PR review 使用 pull_request 和只读 contents 权限，包括 fork；不以 pull_request_target 特权执行贡献者代码。harness 任务声明 `issues: write` 与 `actions: read` 只是因为可复用工作流的结论步骤和兜底的 `unreported` 任务能上报漂移；PR 上 `report` 关闭，fork 的 token 无论如何都是只读。确定性评审无需付费 API key。人工仍需检查描述与代码是否一致，以及预览/HTTP 修改是否削弱安全边界。

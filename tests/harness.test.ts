@@ -27,9 +27,16 @@ const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url),
   devDependencies: Record<string, string>
 }
 const peers = harnessPeers(pkg) as [string, string][]
-const { judge } = createRequire(import.meta.url)('../scripts/harness-verdict.cjs') as {
-  judge: (env: Record<string, string>) => { failed: string[], incomplete: boolean, green: boolean }
+type Verdict = { failed: string[], incomplete: boolean, green: boolean }
+type Issue = { number: number, title: string, state: string, comments: string[] }
+type Job = { name: string, conclusion: string | null, steps?: { name: string, conclusion: string | null }[] }
+const verdict = createRequire(import.meta.url)('../scripts/harness-verdict.cjs') as {
+  (options: { github: unknown, context: unknown, core: unknown, env: Record<string, string> }): Promise<Verdict>
+  judge: (env: Record<string, string>) => Verdict
+  cellOf: (jobName: string) => string | undefined
+  unreported: (options: { github: unknown, context: unknown, core: unknown }) => Promise<{ filed: string[] }>
 }
+const { judge } = verdict
 
 /** Harness versions in publication order, which is also semver order. */
 const PUBLISHED = [
@@ -272,10 +279,103 @@ test('a cell is green only when every expected stage succeeded; incomplete is ne
   assert.deepEqual([setup.failed, setup.green], [['job'], false])
   assert.deepEqual(judge({ ...stages, STAGE_tests: 'failure', JOB_STATUS: 'failure', EXPECTED: expected }).failed, ['tests'])
   assert.equal(judge({ ...stages, JOB_STATUS: 'success', EXPECTED: expected }).green, true)
-  // The plan reports as a cell of its own.
-  assert.deepEqual(judge({ STAGE_plan: 'failure', EXPECTED: 'plan' }).failed, ['plan'])
-  assert.equal(judge({ STAGE_plan: 'success', EXPECTED: 'plan' }).green, true)
   // Admission runs on an incomplete train too, and a refusal there is drift.
   const refusedEarly = judge({ STAGE_resolve: 'success', STAGE_install: 'skipped', STAGE_admission: 'failure', INCOMPLETE: 'true', EXPECTED: expected })
   assert.deepEqual([refusedEarly.failed, refusedEarly.green], [['admission'], false])
+})
+
+/** GitHub's REST client as the verdict uses it: issues with their comment bodies, and this run's jobs. */
+function fakeGithub(issues: Issue[], jobs: Job[] = []) {
+  const calls: string[] = []
+  const github = {
+    paginate: async (fn: unknown, args: { issue_number?: number }) => {
+      if (fn === github.rest.actions.listJobsForWorkflowRun) return jobs
+      if (fn === github.rest.issues.listComments) return issues.find((i) => i.number === args.issue_number)!.comments.map((body) => ({ body }))
+      return issues.filter((i) => i.state === 'open')
+    },
+    rest: {
+      actions: { listJobsForWorkflowRun: () => undefined },
+      issues: {
+        listForRepo: () => undefined,
+        listComments: () => undefined,
+        getLabel: async () => ({}),
+        createLabel: async () => { calls.push('createLabel') },
+        create: async ({ title, body }: { title: string, body: string }) => { calls.push(`create ${title}`); issues.push({ number: issues.length + 1, title, state: 'open', comments: [body] }) },
+        createComment: async ({ issue_number, body }: { issue_number: number, body: string }) => { calls.push(`comment #${issue_number}`); issues.find((i) => i.number === issue_number)!.comments.push(body) },
+        update: async ({ issue_number, state }: { issue_number: number, state: string }) => { calls.push(`${state} #${issue_number}`); issues.find((i) => i.number === issue_number)!.state = state },
+      },
+    },
+  }
+  return { github, calls }
+}
+const context = { serverUrl: 'https://github.com', repo: { owner: 'Crosery', repo: 'dsh-drop' }, runId: 1 }
+const RUN = 'https://github.com/Crosery/dsh-drop/actions/runs/1'
+function fakeCore() {
+  const state = { failed: '' }
+  const summary = { addHeading: () => summary, addList: () => summary, write: async () => undefined }
+  return { core: { summary, setFailed: (m: string) => { state.failed = m } }, state }
+}
+
+test('a failing verdict files its cell once per run, naming the run, and a green one closes it', async () => {
+  const issues: Issue[] = []
+  const { github, calls } = fakeGithub(issues)
+  const env = { CELL: 'desktop', VERSION: '0.1.8-rc.1', REPORT: 'true', INCOMPLETE: 'false', EXPECTED: 'types,tests,admission,smoke', STAGE_types: 'success', STAGE_tests: 'success', STAGE_admission: 'failure', STAGE_smoke: 'cancelled' }
+  const { core, state } = fakeCore()
+  await verdict({ github, context, core, env })
+  await verdict({ github, context, core: fakeCore().core, env })
+  assert.deepEqual(calls, ['create Harness compatibility broken against @desktop', 'comment #1'])
+  assert.match(issues[0]!.comments[0]!, new RegExp(`Run: ${RUN}`))
+  assert.match(issues[0]!.comments[0]!, /\*\*smoke\*\* \(cancelled, which counts as failed\)/)
+  assert.match(state.failed, /admission, smoke/)
+  const green = { ...env, STAGE_admission: 'success', STAGE_smoke: 'success' }
+  assert.equal((await verdict({ github, context, core: fakeCore().core, env: green })).green, true)
+  assert.deepEqual(calls.slice(2), ['comment #1', 'closed #1'])
+  // Not reporting: the job fails, nothing is filed.
+  const quiet = fakeGithub([])
+  await verdict({ github: quiet.github, context, core: fakeCore().core, env: { ...env, REPORT: 'false' } })
+  assert.deepEqual(quiet.calls, [])
+})
+
+test('the catch-all knows which jobs are cells', () => {
+  assert.equal(verdict.cellOf('harness@floor'), 'floor')
+  assert.equal(verdict.cellOf('harness / harness@0.1.2-rc.1'), '0.1.2-rc.1')
+  assert.equal(verdict.cellOf('gate / plan'), 'plan')
+  assert.equal(verdict.cellOf('harness@desktop-bytes'), 'desktop-bytes')
+  for (const other of ['node 24', 'unreported', 'invariants', 'pack']) assert.equal(verdict.cellOf(other), undefined, other)
+})
+
+test('the catch-all files every job that ended without a verdict on record, and nothing twice', async () => {
+  const issues: Issue[] = [
+    // @alpha's verdict ran and filed this run: left alone.
+    { number: 4, title: 'Harness compatibility broken against @alpha', state: 'open', comments: ['old', `failed: types\n\nRun: ${RUN}`] },
+    // @next is open from an earlier run only: this run's timeout is commented there.
+    { number: 5, title: 'Harness compatibility broken against @next', state: 'open', comments: ['from an earlier run'] },
+    // The plan works again: its issue closes.
+    { number: 6, title: 'Harness compatibility run could not plan its cells', state: 'open', comments: ['earlier'] },
+  ]
+  const jobs: Job[] = [
+    { name: 'plan', conclusion: 'success' },
+    { name: 'harness@alpha', conclusion: 'failure' },
+    { name: 'harness@next', conclusion: 'cancelled', steps: [{ name: 'Install that train', conclusion: 'cancelled' }] },
+    { name: 'harness@desktop-bytes', conclusion: 'failure', steps: [{ name: 'Run actions/checkout@v4', conclusion: 'failure' }] },
+    { name: 'harness@0.1.5-rc.3', conclusion: 'timed_out' },
+    { name: 'harness@latest', conclusion: 'success' },
+    { name: 'harness@0.1.6-alpha.2', conclusion: 'skipped' },
+    { name: 'unreported', conclusion: null },
+  ]
+  const { github, calls } = fakeGithub(issues, jobs)
+  const { filed } = await verdict.unreported({ github, context, core: fakeCore().core })
+  assert.deepEqual(filed, ['next', 'desktop-bytes', '0.1.5-rc.3'])
+  assert.deepEqual(calls, [
+    'comment #6', 'closed #6', 'comment #5',
+    'create Harness compatibility broken against @desktop-bytes', 'create Harness compatibility broken against @0.1.5-rc.3',
+  ])
+  assert.match(issues[1]!.comments.at(-1)!, /ended cancelled before its verdict could report[\s\S]*Run: https:[\s\S]*`Install that train` \(cancelled\)/)
+  // Run again, the same run: everything is on record now, nothing is filed twice.
+  const again = await verdict.unreported({ github, context, core: fakeCore().core })
+  assert.deepEqual(again.filed, [])
+
+  const planFailed = fakeGithub([], [{ name: 'plan', conclusion: 'failure' }])
+  await verdict.unreported({ github: planFailed.github, context, core: fakeCore().core })
+  assert.deepEqual(planFailed.calls, ['create Harness compatibility run could not plan its cells'])
 })

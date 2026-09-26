@@ -47,9 +47,11 @@
 # timeout, and the job's is their sum plus margin, so a hung step fails as
 # itself instead of the job being cancelled around it; a stage cut off while
 # the run goes on counts as failed (a run someone cancelled reports nothing);
-# a step outside the stages (checkout, Node, npm ci, the cache, the artifact
-# upload) fails the cell as `job`; and a plan that does not expand reports as
-# `harness@plan`.
+# and a step outside the stages (checkout, Node, npm ci, the cache, the
+# artifact upload) fails the cell as `job`. What still gets past a verdict —
+# a checkout that failed before the verdict script existed, a verdict that
+# failed, a job that ran out of time, a plan that never produced cells — the
+# `unreported` job files from the run's own job list.
 name: Harness compatibility
 
 on:
@@ -131,37 +133,6 @@ jobs:
           CELLS: ${{ inputs.cells || (github.event.schedule == '43 6 * * 1' && 'sweep') || 'desktop,latest,next,alpha' }}
           SMOKE: ${{ inputs.smoke || 'heads' }}
         run: node scripts/harness-target.mjs --plan "$CELLS" --smoke "$SMOKE"
-
-  # Without a plan there are no cells, so nothing else would say the run
-  # failed: a registry or a desktop feed that did not answer, or a sweep that
-  # found nothing. Reported as the cell `plan`; a plan that works again closes it.
-  plan-verdict:
-    needs: plan
-    if: ${{ !cancelled() && (github.event_name == 'schedule' || inputs.report) }}
-    name: harness@plan
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-      issues: write
-    steps:
-      - uses: actions/checkout@v4
-        timeout-minutes: 5
-        with:
-          ref: ${{ inputs.ref || github.ref }}
-          persist-credentials: false
-
-      - name: Verdict
-        timeout-minutes: 5
-        uses: actions/github-script@v7
-        env:
-          CELL: plan
-          INCOMPLETE: 'false'
-          EXPECTED: plan
-          REPORT: 'true'
-          STAGE_plan: ${{ needs.plan.result }}
-        with:
-          script: await require('./scripts/harness-verdict.cjs')({ github, context, core })
 
   against:
     needs: plan
@@ -445,3 +416,34 @@ jobs:
           STAGE_smoke: ${{ steps.smoke.outcome }}
         with:
           script: await require('./scripts/harness-verdict.cjs')({ github, context, core })
+
+  # The catch-all on reporting runs. It reads this run's job list (hence
+  # `actions: read`) and files every plan or cell job that failed or was
+  # cancelled while its issue does not mention this run: the job's checkout
+  # failed before its verdict script existed, the verdict itself failed, the
+  # job ran out of time, or the plan never produced cells. A verdict that did
+  # file its cell is left alone, and a plan that works again closes the plan
+  # issue. Its own checkout (the scripts only) is independent of every job it
+  # judges.
+  unreported:
+    needs: [plan, against, desktop-bytes]
+    if: ${{ !cancelled() && (github.event_name == 'schedule' || inputs.report) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        timeout-minutes: 5
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
+          sparse-checkout: scripts
+
+      - name: File what no verdict reported
+        timeout-minutes: 5
+        uses: actions/github-script@v7
+        with:
+          script: await require('./scripts/harness-verdict.cjs').unreported({ github, context, core })

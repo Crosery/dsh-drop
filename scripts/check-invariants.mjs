@@ -116,7 +116,14 @@ assert.match(release, /tarball: release-asset/, 'the release gate must smoke the
 assert.match(release, /r\.sha256 !== asset/, 'the release must refuse an asset whose bytes the gate did not smoke')
 assert.match(release, /dsh-drop\.tgz SHA256SUMS/, 'a release attaches dsh-drop.tgz and SHA256SUMS')
 assert.match(compat, /--tarball "\$TARBALL"/, 'harness-compat.yml must smoke the tarball it is given')
-for (const stage of ['smoke-boot.mjs', 'check-dist.mjs --bundle-only --train "$VERSION"', '--admits', 'harness-verdict.cjs', 'desktop-bytes']) assert.ok(compat.includes(stage), 'harness-compat.yml lost ' + stage)
+for (const stage of ['smoke-boot.mjs', 'check-dist.mjs --bundle-only --train "$VERSION"', '--admits', 'harness-verdict.cjs', 'desktop-bytes', "harness-verdict.cjs').unreported("]) assert.ok(compat.includes(stage), 'harness-compat.yml lost ' + stage)
+// The catch-all needs the run's job list; a caller cannot grant a called workflow less than it declares.
+assert.match(compat, /unreported:\s+needs: \[plan, against, desktop-bytes\][\s\S]*?actions: read/, 'the unreported job must follow every job and read the run\'s jobs')
+for (const [file, text] of [['ci.yml', ci], ['release.yml', release]]) {
+  for (const call of text.split(/\n(?=  \S)/).filter((job) => job.includes('uses: ./.github/workflows/harness-compat.yml'))) {
+    assert.match(call, /actions: read/, `${file} must grant actions: read to every harness-compat call`)
+  }
+}
 const shots = JSON.parse(read('screenshots.json'))
 assert.ok(Array.isArray(shots) && shots.length >= 1 && shots.length <= 8)
 for (const rel of shots) {
