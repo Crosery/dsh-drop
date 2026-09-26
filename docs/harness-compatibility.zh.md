@@ -38,7 +38,7 @@ Host peer 对每个支持的元组各用一个带预发布标记的比较器：`
 
 各格与扫描安装序列的方式（`scripts/harness-lib.mjs`）：
 
-- **devDependencies（types、tests）。** 该序列发布过的每个 `@deepseek-ai/dsh-*` devDependency 改指向该精确版本。从未发布的保持本仓库的 pin——0.1.0 与 0.1.1 上的 `@deepseek-ai/dsh-client-store`，其声明并不 import 它——除非插件离不开它（`dsh-client-ui-renderer`、`-conversation`、`-slots` 或任一 peer），那样该序列就不在支持范围内。`@deepseek-ai/dsh-client-runtime` 在 0.1.0–0.1.1 上声明 slot 注册表、之后不再发布，会以该序列的版本补进来。Cordis 跟随该序列 `@deepseek-ai/dsh` 实际携带的版本，并固定为该范围实际安装到的精确版本。peer 会被安装；peer 图遇到 ERESOLVE 的序列（0.1.1-rc.1 与 0.1.5 系列）改用 legacy peer 模式重装，并把已固定包的每个 harness peer 固定到该序列版本。
+- **devDependencies（types、tests）。** 该序列发布过的每个 `@deepseek-ai/dsh-*` devDependency 改指向该精确版本。从未发布的保持本仓库的 pin——0.1.0 与 0.1.1 上的 `@deepseek-ai/dsh-client-store`，其声明并不 import 它——除非插件离不开它（`dsh-client-ui-renderer`、`-conversation`、`-slots` 或任一 peer），那样该序列就不在支持范围内。`@deepseek-ai/dsh-client-runtime` 在 0.1.0–0.1.1 上声明 slot 注册表、之后不再发布，会以该序列的版本补进来。Cordis 跟随该序列 `@deepseek-ai/dsh` 实际携带的版本，并固定为该范围实际安装到的精确版本。其余 devDependency——TypeScript、`@types/*`、esbuild、semver——固定为 package-lock.json 中的版本：改指向后的副本不带锁文件安装，隔夜发布的编译器或类型包不能把某个序列弄红。peer 会被安装；peer 图遇到 ERESOLVE 的序列（0.1.1-rc.1 与 0.1.5 系列）改用 legacy peer 模式重装，并把已固定包的每个 harness peer 固定到该序列版本。
 - **harness 本身（smoke）。** 按发布时的依赖图安装 `@deepseek-ai/dsh@<版本>`：用 `--before` 截止到下一个 harness 发布之前，因为 cordis 系列在每个序列下都是浮动的——今天全新安装 0.1.1-rc.2，不装任何插件也会在启动时报 "user patch-layer watching requires the Cordis HMR service"。npm 在 90 秒内解不完 peer 图时（npm 11 下 0.1.1-rc.2 要耗约十分钟 CPU），改用 legacy peer 模式安装，再把它留下的每个未满足的必需 peer 按声明范围补齐。
 
 ## 已验证序列

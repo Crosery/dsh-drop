@@ -147,6 +147,24 @@ test("only npm's answers about the packages count as an upstream gap", () => {
   assert.equal(upstreamGap({ ok: true, output: 'npm error code E404' }), undefined)
 })
 
+test('a repointed manifest pins every other devDependency at its lockfile version', () => {
+  const fixture = {
+    peerDependencies: {},
+    devDependencies: { '@deepseek-ai/cordis': '4.0.4', '@deepseek-ai/dsh-client-ui-slots': '0.1.7-rc.2', '@types/node': '^24.0.0', typescript: '^5.9.0' },
+  }
+  const lock: Record<string, string> = { '@types/node': '24.13.6', typescript: '5.9.3' }
+  const facts = (locked: Record<string, string | undefined>) => ({ publishedAt: (name: string) => !TRAIN_EXTRAS.includes(name), locked: (name: string) => locked[name] })
+  const plan = planRepoint(fixture, FLOOR, facts(lock)) as { manifest: typeof fixture, locked: string[] }
+  // A TypeScript or @types/node published overnight cannot reach the cell.
+  assert.deepEqual(plan.manifest.devDependencies, {
+    '@deepseek-ai/cordis': '4.0.4', '@deepseek-ai/dsh-client-ui-slots': FLOOR, '@types/node': '24.13.6', typescript: '5.9.3',
+  })
+  assert.deepEqual(plan.locked, ['@types/node@24.13.6', 'typescript@5.9.3'])
+  // An out-of-date lockfile is refused rather than guessed around.
+  assert.throws(() => planRepoint(fixture, FLOOR, facts({ ...lock, typescript: undefined })), /has no version for typescript@\^5\.9\.0/)
+  assert.throws(() => planRepoint(fixture, FLOOR, facts({ ...lock, typescript: '6.0.3' })), /holds 6\.0\.3 for typescript@\^5\.9\.0/)
+})
+
 test('a desktop feed is read with its folded path and sha512', () => {
   const sha512 = `${'A'.repeat(86)}==`
   const feed = parseFeed([

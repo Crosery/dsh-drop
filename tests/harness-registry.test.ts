@@ -30,17 +30,23 @@ type Mode = 'not-found' | 'fault' | 'silent' | 'one-train'
 const servers: Server[] = []
 const registries = {} as Record<Mode, string>
 
-/** Serve `mode`: 404 for everything, 500 for everything, never answer, or list only 0.1.7-rc.2 of the harness. */
+/**
+ * Serve `mode`: 404 for everything, 500 for everything, never answer, or one
+ * train — the harness and every `dsh-*` package at 0.1.7-rc.2 only, the harness
+ * shipping cordis 4.0.4, and `dsh-client-runtime` (gone after 0.1.1) absent.
+ */
 async function standIn(mode: Mode) {
   const server = createServer((req, res) => {
     if (mode === 'silent') return
     if (mode === 'fault') { res.statusCode = 500; res.end('{"error":"boom"}'); return }
-    if (mode === 'one-train' && decodeURIComponent(req.url ?? '') === '/@deepseek-ai/dsh') {
+    const name = decodeURIComponent(req.url ?? '').slice(1)
+    if (mode === 'one-train' && (name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-')) && name !== '@deepseek-ai/dsh-client-runtime') {
       const version = '0.1.7-rc.2'
+      const dependencies = name === '@deepseek-ai/dsh' ? { '@deepseek-ai/cordis': '4.0.4' } : {}
       res.setHeader('content-type', 'application/json')
       res.end(JSON.stringify({
-        name: '@deepseek-ai/dsh', 'dist-tags': { latest: version },
-        versions: { [version]: { name: '@deepseek-ai/dsh', version, dist: { tarball: `http://127.0.0.1/${version}.tgz` } } },
+        name, 'dist-tags': { latest: version },
+        versions: { [version]: { name, version, dependencies, dist: { tarball: `http://127.0.0.1/${version}.tgz` } } },
       }))
       return
     }
@@ -155,6 +161,18 @@ test('only a train npm really lacks is incomplete, and pinned and floor never ar
     assert.doesNotMatch(floor.stdout, /incomplete=true/, cell)
     assert.match(floor.stderr, /published in full/, cell)
   }
+  // The one train npm has is repointed, with every other devDependency held at the lockfile.
+  const lock = JSON.parse(readFileSync(join(dir, 'package-lock.json'), 'utf8')) as { packages: Record<string, { version: string }> }
+  const repointed = await exec(registries['one-train'], dir, ['scripts/harness-target.mjs', '0.1.7-rc.2', '--repoint'])
+  assert.equal(repointed.code, 0, repointed.stdout + repointed.stderr)
+  const { devDependencies } = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as { devDependencies: Record<string, string> }
+  for (const [name, spec] of Object.entries(devDependencies)) {
+    assert.equal(spec, name.startsWith('@deepseek-ai/dsh-') ? '0.1.7-rc.2' : lock.packages[`node_modules/${name}`]!.version, name)
+  }
+  rmSync(join(dir, 'package-lock.json'))
+  const unlocked = await exec(registries['one-train'], dir, ['scripts/harness-target.mjs', '0.1.7-rc.2', '--repoint'])
+  assert.equal(unlocked.code, 1, unlocked.stdout + unlocked.stderr)
+  assert.match(unlocked.stderr, /package-lock\.json is missing/)
   // A registry that 404s the harness itself is broken, not a train that is not out yet.
   const blank = await exec(registries['not-found'], dir, ['scripts/harness-target.mjs', '0.1.9-rc.1', '--repoint'])
   assert.equal(blank.code, 1, blank.stdout + blank.stderr)

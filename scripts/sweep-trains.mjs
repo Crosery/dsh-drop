@@ -8,7 +8,8 @@
  * `scripts/harness-lib.mjs` for the rules: every `@deepseek-ai/dsh-*`
  * devDependency the train published moves to it, one it never published keeps
  * this repository's pin unless the plugin needs it, `dsh-client-runtime` rides
- * along where the train has it, cordis follows the train, and a peer graph
+ * along where the train has it, cordis follows the train, every other
+ * devDependency stays at its package-lock.json version, and a peer graph
  * that hits ERESOLVE is reinstalled in legacy peer mode with the train's own
  * harness peers) — and then runs `npm run typecheck` (all three programs), the
  * bundle's seed-member check against that train's exports
@@ -39,8 +40,12 @@ import { HARNESS, harnessPeers, refusals, versionsOf } from './harness-lib.mjs'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 
-/** Tracked sources a scratch copy needs; the lockfile is deliberately absent. */
-const COPY = ['src', 'tests', 'scripts', 'lib', 'package.json', 'tsconfig.json', 'tsconfig.client.json', 'tsconfig.test.json']
+/**
+ * Tracked sources a scratch copy needs. The lockfile only supplies the
+ * versions the repoint pins non-harness devDependencies at; the install
+ * itself starts without it.
+ */
+const COPY = ['src', 'tests', 'scripts', 'lib', 'package.json', 'package-lock.json', 'tsconfig.json', 'tsconfig.client.json', 'tsconfig.test.json']
 
 const args = process.argv.slice(2)
 const flag = (name) => {

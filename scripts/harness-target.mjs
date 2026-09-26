@@ -24,7 +24,8 @@
  * --repoint  rewrites every `@deepseek-ai/dsh-*` devDependency the train
  *            published to the exact version (a package it never published
  *            keeps its pin unless the plugin requires it; cordis follows the
- *            train) and writes the exact versions to the step summary.
+ *            train), pins every other devDependency at its package-lock.json
+ *            version, and writes the exact versions to the step summary.
  * --install  installs the result from scratch (`npm ci` for `pinned`), in
  *            legacy peer mode with the train's own harness peers if its peer
  *            graph does not resolve on its own — see `installTrain`.
@@ -44,7 +45,7 @@
  * `--admits` needs no registry at all.
  */
 
-import { appendFileSync, readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
@@ -171,7 +172,9 @@ async function target(cell) {
   if ((flags.repoint || flags.install) && cell !== 'pinned') {
     // The Web app at the same version must exist, or there is nothing to install.
     if (!versionsOf(HARNESS).includes(version)) throw incomplete(`${HARNESS}@${version} is not on npm yet`)
-    const repointed = repointManifest(pkg, version)
+    const lockPath = join(root, 'package-lock.json')
+    if (!existsSync(lockPath)) throw new Error('package-lock.json is missing: a repointed cell pins its non-harness devDependencies at the lockfile\'s versions')
+    const repointed = repointManifest(pkg, version, JSON.parse(readFileSync(lockPath, 'utf8')))
     if (repointed.missing.length > 0) {
       const missing = repointed.missing.map((m) => `${m.name} (${m.why})`).join(', ')
       out('missing', missing)
@@ -179,12 +182,15 @@ async function target(cell) {
     }
     if (repointed.kept.length > 0) summary(`- not published at ${version}, keeps this repository's pin: ${repointed.kept.join(', ')}`)
     if (repointed.added.length > 0) summary(`- added at ${version}: ${repointed.added.join(', ')}`)
+    if (repointed.locked.length > 0) summary(`- other devDependencies pinned at package-lock.json: ${repointed.locked.join(', ')}`)
     manifest = repointed.manifest
     writeFileSync(pkgPath, JSON.stringify(manifest, null, 2) + '\n')
   }
   if (flags.repoint) {
     const exact = Object.entries(manifest.devDependencies).filter(([n]) => n.startsWith('@deepseek-ai/'))
     console.log(`harness devDependencies:\n${exact.map(([n, v]) => `  ${n}@${v}`).join('\n')}`)
+    const others = Object.entries(manifest.devDependencies).filter(([n]) => !n.startsWith('@deepseek-ai/'))
+    console.log(`other devDependencies:\n${others.map(([n, v]) => `  ${n}@${v}`).join('\n')}`)
     summary(['', '| package | version |', '| --- | --- |', ...exact.map(([n, v]) => `| \`${n}\` | \`${v}\` |`), ''].join('\n'))
   }
 

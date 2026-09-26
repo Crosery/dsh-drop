@@ -191,10 +191,17 @@ export function parseFeed(text) {
  * against what it runs and every pin stays exact; `schemastery` is this
  * plugin's own runtime dependency and stays as declared.
  *
+ * A repointed copy is installed without the lockfile, so every other
+ * devDependency (TypeScript, `@types/*`, esbuild, semver) is pinned at the
+ * version `facts.locked` reads from package-lock.json: a TypeScript or
+ * `@types/node` released overnight must not turn a train red and have it
+ * blamed on the harness. One the lockfile lacks, or holds outside the
+ * declared range, is an out-of-date lockfile and throws.
+ *
  * @param {object} pkg - the repository manifest.
  * @param {string} version - the exact harness version.
- * @param {{ publishedAt: (name: string) => boolean, shipped?: Record<string, string>, exact?: (name: string, range: string) => string | undefined }} facts
- * @returns {{ manifest: object, missing: string[], kept: string[], added: string[] }}
+ * @param {{ publishedAt: (name: string) => boolean, shipped?: Record<string, string>, exact?: (name: string, range: string) => string | undefined, locked?: (name: string) => string | undefined }} facts
+ * @returns {{ manifest: object, missing: string[], kept: string[], added: string[], locked: string[] }}
  */
 export function planRepoint(pkg, version, facts) {
   const manifest = structuredClone(pkg)
@@ -202,10 +209,21 @@ export function planRepoint(pkg, version, facts) {
   const missing = []
   const kept = []
   const added = []
+  const locked = []
   for (const name of Object.keys(manifest.devDependencies).filter((n) => n.startsWith('@deepseek-ai/dsh-'))) {
     if (facts.publishedAt(name)) manifest.devDependencies[name] = version
     else if (required.has(name)) missing.push(name)
     else kept.push(name)
+  }
+  if (facts.locked !== undefined) {
+    for (const [name, declared] of Object.entries(manifest.devDependencies).filter(([n]) => !n.startsWith('@deepseek-ai/'))) {
+      const at = facts.locked(name)
+      if (!semver.valid(at) || !semver.satisfies(at, declared)) {
+        throw new Error(`package-lock.json ${at === undefined ? 'has no version' : `holds ${at}`} for ${name}@${declared}: run npm install and commit the lockfile`)
+      }
+      manifest.devDependencies[name] = at
+      locked.push(`${name}@${at}`)
+    }
   }
   for (const name of TRAIN_EXTRAS) {
     if (!(name in manifest.devDependencies) && facts.publishedAt(name)) {
@@ -218,7 +236,7 @@ export function planRepoint(pkg, version, facts) {
     const exact = semver.valid(cordis) ?? facts.exact?.('@deepseek-ai/cordis', cordis)
     if (semver.valid(exact)) manifest.devDependencies['@deepseek-ai/cordis'] = exact
   }
-  return { manifest, missing, kept, added }
+  return { manifest, missing, kept, added, locked }
 }
 
 /**
@@ -337,12 +355,14 @@ export function tail(text, lines = 6) {
 }
 
 /**
- * {@link planRepoint} with npm's answers. `missing` names each absent required
- * package with why it is absent.
- * @returns {{ manifest: object, missing: { name: string, why: string }[], kept: string[], added: string[] }}
+ * {@link planRepoint} with npm's answers and the lockfile's versions (`lock`,
+ * the parsed package-lock.json). `missing` names each absent required package
+ * with why it is absent.
+ * @returns {{ manifest: object, missing: { name: string, why: string }[], kept: string[], added: string[], locked: string[] }}
  */
-export function repointManifest(pkg, version) {
+export function repointManifest(pkg, version, lock) {
   const plan = planRepoint(pkg, version, {
+    locked: (name) => lock.packages?.[`node_modules/${name}`]?.version,
     publishedAt: (name) => versionsOf(name).includes(version),
     shipped: view(`${HARNESS}@${version}`, 'dependencies') ?? {},
     exact: (name, range) => {
