@@ -357,6 +357,25 @@ function unmetPeers(modules) {
 }
 
 /**
+ * Chrome itself going away mid-stage — a renderer or browser crash on a
+ * loaded machine — says nothing about the plugin. One fresh attempt, with a
+ * new profile, decides; any other failure, and a second crash, stands.
+ */
+const BROWSER_GONE = /Target page, context or browser has been closed|Browser has been closed|browser has disconnected|Target closed/i
+async function withBrowserRetry(stages, runOnce) {
+  try {
+    return await runOnce(1)
+  } catch (error) {
+    const failed = stages.map((name) => result.stages[name]).filter((s) => s?.outcome === 'failed')
+    const said = `${String(error?.message ?? error)} ${JSON.stringify(failed.map((s) => s.detail))}`
+    if (!BROWSER_GONE.test(said)) throw error
+    for (const name of stages) delete result.stages[name]
+    console.log('note: Chrome closed mid-stage; the browser stages run once more with a fresh profile')
+    return await runOnce(2)
+  }
+}
+
+/**
  * The browser stages. Everything they touch lives in this run's directory: the
  * browser profile, the dropped file, the screenshots unless `--screenshots`
  * (or SMOKE_SCREENSHOTS) names a directory to keep them in.
@@ -374,7 +393,7 @@ function unmetPeers(modules) {
  *   a settled card in this plugin's rail, with no "open a session first"
  *   notice ({@link dropVerdict}).
  */
-async function inBrowser(base, cookie) {
+async function inBrowser(base, cookie, attempt = 1) {
   let playwright
   try {
     playwright = await import('playwright-core')
@@ -382,7 +401,7 @@ async function inBrowser(base, cookie) {
     fail('client-boot', `playwright-core is not installed (npm ci installs it as a devDependency): ${error?.message ?? error}`)
   }
   const chromium = playwright.chromium ?? playwright.default?.chromium
-  const profile = join(work, 'browser-profile')
+  const profile = join(work, `browser-profile-${attempt}`)
   assert.ok(profile.startsWith(work), 'refusing a browser profile outside this run')
   const executablePath = values.browser ?? process.env.CHROME_PATH
   const shots = values.screenshots ?? process.env.SMOKE_SCREENSHOTS
@@ -788,7 +807,7 @@ try {
 
   // 10. The same page in a real browser: the app settles with this plugin
   //     active, and a file dropped on the composer lands in this plugin's rail.
-  await inBrowser(base, cookie)
+  await withBrowserRetry(['client-boot', 'client-drop'], (attempt) => inBrowser(base, cookie, attempt))
 } catch (error) {
   if (!(error instanceof StageFailed)) stage('smoke', 'failed', mask(String(error?.message ?? error)).slice(0, 2000))
 } finally {
