@@ -334,6 +334,21 @@ describe('Lexical composer (0.1.2 onward)', () => {
     }
   })
 
+  it('leaves those keys, default included, alone when nothing is staged', () => {
+    for (const { name, props } of modified) {
+      const composer = new Composer()
+      composer.text = 'hello'
+      const { input } = lexicalCard()
+      const guard = harness(composer, [])
+      try {
+        let reached = false
+        assert.equal(dispatch('keydown', input, props, () => { reached = true }), false, `${name}: default untouched`)
+        assert.equal(reached, true, `${name}: the composer's own handler runs`)
+        assert.equal(composer.text, 'hello')
+      } finally { guard.release() }
+    }
+  })
+
   it('leaves the default of an Enter every composer sends on alone', () => {
     const composer = new Composer()
     const { input } = lexicalCard()
