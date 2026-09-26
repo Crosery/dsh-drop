@@ -34,12 +34,12 @@ Host peer 对每个支持的元组各用一个带预发布标记的比较器：`
 
 `desktop-bytes` 下载 feed 指向的 mac-arm64 zip，要求其 sha512 与 feed 一致、内置的 `desktop-runtime.json` 和 `@deepseek-ai/dsh` 与 feed 版本一致，然后以应用的 Electron 可执行文件作为 Node（`ELECTRON_RUN_AS_NODE=1`）对 `Contents/Resources/app.asar/dsh` 跑同样的冒烟，PATH 上用应用自带的 pnpm。应用窗口、preload 桥（`__DSH_HOST_PATHS__`）和原生拖放不在 CI 范围内。
 
-某序列发布时缺少本插件需要的包，或 npm 上还没有，记为**不完整**：该格为中性，不开也不关 issue，但 admission 仍会运行——准入不需要安装，范围拒绝的版本即便 npm 上还不全也算漂移。只有 npm 对包本身的回答才会判为不完整：某个包或版本 E404、ETARGET，或依赖图 ERESOLVE，并且同版本 `@deepseek-ai/dsh` 的裸安装也以同类回答失败。registry 不应答、返回错误或超时，则判该格失败；`pinned` 与 `floor` 永远不会是不完整。定时或手动触发时，失败的格会新开（或追加评论到）`upstream-drift` issue「Harness compatibility broken against @<格>」；某格全部通过时会在该 issue 下评论并关闭它。CI 从不放宽范围，也不发布。
+某序列发布时缺少本插件需要的包，或 npm 上还没有，记为**不完整**：该格为中性，不开也不关 issue，但 admission 仍会运行——准入不需要安装，范围拒绝的版本即便 npm 上还不全也算漂移。只有 npm 对包本身的回答才会判为不完整：某个包或版本 E404、ETARGET，或依赖图 ERESOLVE，并且同版本 `@deepseek-ai/dsh` 的裸安装也以同类回答失败。registry 不应答、返回错误或超时，则判该格失败；`pinned` 与 `floor` 永远不会是不完整。定时或手动触发时，失败的格会新开（或追加评论到）`upstream-drift` issue「Harness compatibility broken against @<格>」；某格全部通过时会在该 issue 下评论并关闭它。每种失败都会走到这个判定：每一步都有自己的超时，job 的超时是它们之和再加余量，所以卡住的步骤以它自己的名义失败；运行未被取消而某一项被中断，算作失败（只有有人取消了整次运行时才什么都不报）；四项之外的步骤——checkout、Node、`npm ci`、缓存、产物上传——失败时，该格以 `job` 失败；格列表展不开时以 `harness@plan` 上报。CI 从不放宽范围，也不发布。
 
 各格与扫描安装序列的方式（`scripts/harness-lib.mjs`）：
 
 - **devDependencies（types、tests）。** 该序列发布过的每个 `@deepseek-ai/dsh-*` devDependency 改指向该精确版本。从未发布的保持本仓库的 pin——0.1.0 与 0.1.1 上的 `@deepseek-ai/dsh-client-store`，其声明并不 import 它——除非插件离不开它（`dsh-client-ui-renderer`、`-conversation`、`-slots` 或任一 peer），那样该序列就不在支持范围内。`@deepseek-ai/dsh-client-runtime` 在 0.1.0–0.1.1 上声明 slot 注册表、之后不再发布，会以该序列的版本补进来。Cordis 跟随该序列 `@deepseek-ai/dsh` 实际携带的版本，并固定为该范围实际安装到的精确版本。其余 devDependency——TypeScript、`@types/*`、esbuild、semver——固定为 package-lock.json 中的版本：改指向后的副本不带锁文件安装，隔夜发布的编译器或类型包不能把某个序列弄红。peer 会被安装；peer 图遇到 ERESOLVE 的序列（0.1.1-rc.1 与 0.1.5 系列）改用 legacy peer 模式重装，并把已固定包的每个 harness peer 固定到该序列版本。
-- **harness 本身（smoke）。** 按发布时的依赖图安装 `@deepseek-ai/dsh@<版本>`：用 `--before` 截止到下一个 harness 发布之前，因为 cordis 系列在每个序列下都是浮动的——今天全新安装 0.1.1-rc.2，不装任何插件也会在启动时报 "user patch-layer watching requires the Cordis HMR service"。npm 在 90 秒内解不完 peer 图时（npm 11 下 0.1.1-rc.2 要耗约十分钟 CPU），改用 legacy peer 模式安装，再把它留下的每个未满足的必需 peer 按声明范围补齐。
+- **harness 本身（smoke）。** 按发布时的依赖图安装 `@deepseek-ai/dsh@<版本>`：用 `--before` 截止到下一个 harness 发布之前，因为 cordis 系列在每个序列下都是浮动的——今天全新安装 0.1.1-rc.2，不装任何插件也会在启动时报 "user patch-layer watching requires the Cordis HMR service"。npm 在 120 秒内解不完 peer 图时（npm 11 下 0.1.1-rc.2 要耗约十分钟 CPU），改用 legacy peer 模式安装，再把它留下的每个未满足的必需 peer 按声明范围补齐。冒烟运行的其他命令超过 10 分钟、对已启动服务的请求超过 30 秒即被终止，该项判为失败而不是一直挂着。
 
 ## 已验证序列
 

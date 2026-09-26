@@ -59,11 +59,15 @@ if (resolveDsh) args.splice(args.indexOf('--resolve-dsh'), 1)
 const work = flag('--work') ?? await mkdtemp(join(tmpdir(), 'dsh-drop-sweep-'))
 const jobs = Number(flag('--jobs') ?? 4)
 
-/** Run a command, capturing output and exit code; never throws. */
+/** One step of one row: long enough for a slow peer graph plus npm's own retries. */
+const STEP_TIMEOUT_MS = 45 * 60_000
+
+/** Run a command, capturing output and exit code; never throws. A hung step is killed and fails its row. */
 function exec(cwd, command, argv) {
   return new Promise((resolve) => {
-    execFile(command, argv, { cwd, maxBuffer: 64 * 1024 * 1024, env: { ...process.env, npm_config_update_notifier: 'false', GITHUB_OUTPUT: '', GITHUB_STEP_SUMMARY: '' } }, (error, stdout, stderr) => {
-      resolve({ ok: !error, code: error ? (typeof error.code === 'number' ? error.code : 1) : 0, out: `${stdout ?? ''}${stderr ?? ''}` })
+    execFile(command, argv, { cwd, maxBuffer: 64 * 1024 * 1024, timeout: STEP_TIMEOUT_MS, killSignal: 'SIGKILL', env: { ...process.env, npm_config_update_notifier: 'false', GITHUB_OUTPUT: '', GITHUB_STEP_SUMMARY: '' } }, (error, stdout, stderr) => {
+      const killed = error?.killed ? `\n::error::${command} ${argv[0] ?? ''} killed after ${STEP_TIMEOUT_MS / 60_000} min` : ''
+      resolve({ ok: !error, code: error ? (typeof error.code === 'number' ? error.code : 1) : 0, out: `${stdout ?? ''}${stderr ?? ''}${killed}` })
     })
   })
 }

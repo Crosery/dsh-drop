@@ -17,6 +17,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
+import { run, upstreamGap } from '../scripts/harness-lib.mjs'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 const scratch = mkdtempSync(join(tmpdir(), 'dsh-drop-registry-'))
@@ -84,6 +85,7 @@ function exec(registry: string, cwd: string, argv: string[], extra: Record<strin
         // A CI run's own outputs must not receive this suite's answers.
         GITHUB_OUTPUT: '',
         GITHUB_STEP_SUMMARY: '',
+        SMOKE_RESULT: '',
         ...extra,
       },
     })
@@ -189,4 +191,18 @@ test('the sweep reports a registry that does not answer as a failure, never as o
   const all = await exec(CLOSED, root, ['scripts/sweep-trains.mjs', '--work', join(scratch, 'sweep-all')])
   assert.equal(all.code, 1, all.stdout + all.stderr)
   assert.match(all.stderr, /cannot list the trains to sweep: .*ECONNREFUSED/)
+})
+
+test('a command that hangs is killed, and its timeout proves nothing about a train', () => {
+  const hung = run(scratch, process.execPath, ['-e', 'setTimeout(() => {}, 60_000)'], { timeout: 500 })
+  assert.deepEqual([hung.ok, hung.timedOut], [false, true])
+  assert.match(hung.output, /killed after 0\.5 s/)
+  assert.equal(upstreamGap(hung), undefined)
+})
+
+test('the boot smoke gives up on a registry that never answers', async () => {
+  const smoke = await exec(registries.silent, root, ['scripts/smoke-boot.mjs', '--dsh', '0.1.7-rc.2', '--command-timeout-ms', '1500'])
+  assert.equal(smoke.code, 1, smoke.stdout + smoke.stderr)
+  assert.match(smoke.stdout, /FAILED {2}smoke — npm view @deepseek-ai\/dsh time --json timed out/)
+  assert.match(smoke.stdout, /boot smoke: @crosery\/dsh-drop@\S+ on dsh \? — failed/)
 })

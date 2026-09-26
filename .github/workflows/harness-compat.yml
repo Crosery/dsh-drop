@@ -42,6 +42,13 @@
 # Scheduled and dispatched runs report: a failing cell opens or comments on
 # the `upstream-drift` issue "Harness compatibility broken against @<cell>",
 # and a cell whose every stage passes comments on that issue and closes it.
+# Every way a cell can go wrong reaches its verdict: each step has its own
+# timeout, and the job's is their sum plus margin, so a hung step fails as
+# itself instead of the job being cancelled around it; a stage cut off while
+# the run goes on counts as failed (a run someone cancelled reports nothing);
+# a step outside the stages (checkout, Node, npm ci, the cache, the artifact
+# upload) fails the cell as `job`; and a plan that does not expand reports as
+# `harness@plan`.
 name: Harness compatibility
 
 on:
@@ -92,34 +99,71 @@ permissions:
 jobs:
   plan:
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
     steps:
       - uses: actions/checkout@v4
+        timeout-minutes: 5
         with:
           ref: ${{ inputs.ref || github.ref }}
           persist-credentials: false
 
       - uses: actions/setup-node@v4
+        timeout-minutes: 5
         with:
           node-version: '24'
           cache: npm
 
       # The resolver needs semver; the lockfile provides it.
       - run: npm ci --ignore-scripts --no-audit --no-fund
+        timeout-minutes: 10
 
       - name: Plan the cells
         id: plan
+        timeout-minutes: 10
         env:
           CELLS: ${{ inputs.cells || (github.event.schedule == '43 6 * * 1' && 'sweep') || 'desktop,latest,next,alpha' }}
           SMOKE: ${{ inputs.smoke || 'heads' }}
         run: node scripts/harness-target.mjs --plan "$CELLS" --smoke "$SMOKE"
 
+  # Without a plan there are no cells, so nothing else would say the run
+  # failed: a registry or a desktop feed that did not answer, or a sweep that
+  # found nothing. Reported as the cell `plan`; a plan that works again closes it.
+  plan-verdict:
+    needs: plan
+    if: ${{ !cancelled() && (github.event_name == 'schedule' || inputs.report) }}
+    name: harness@plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        timeout-minutes: 5
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
+
+      - name: Verdict
+        timeout-minutes: 5
+        uses: actions/github-script@v7
+        env:
+          CELL: plan
+          INCOMPLETE: 'false'
+          EXPECTED: plan
+          REPORT: 'true'
+          STAGE_plan: ${{ needs.plan.result }}
+        with:
+          script: await require('./scripts/harness-verdict.cjs')({ github, context, core })
+
   against:
     needs: plan
     name: harness@${{ matrix.cell }}
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # The sum of the step timeouts below (125), plus margin for the post steps.
+    timeout-minutes: 140
     # Only the verdict writes issues, and only when reporting. A caller must
     # grant this too: a called workflow cannot hold more than its caller gives.
     permissions:
@@ -132,21 +176,25 @@ jobs:
       CELL: ${{ matrix.cell }}
     steps:
       - uses: actions/checkout@v4
+        timeout-minutes: 5
         with:
           ref: ${{ inputs.ref || github.ref }}
           persist-credentials: false
 
       - uses: actions/setup-node@v4
+        timeout-minutes: 5
         with:
           node-version: '24'
           cache: npm
 
       - run: npm ci --ignore-scripts --no-audit --no-fund
+        timeout-minutes: 10
 
       # Exit 3 is an incomplete train: the step passes, `incomplete` is set,
       # and every later stage but admission stands down.
       - name: Resolve ${{ matrix.cell }}
         id: target
+        timeout-minutes: 10
         run: |
           set +e
           node scripts/harness-target.mjs "$CELL" --repoint
@@ -160,6 +208,7 @@ jobs:
       - name: Install that train
         id: install
         if: steps.target.outputs.incomplete != 'true'
+        timeout-minutes: 25
         env:
           TARGET: ${{ matrix.cell == 'pinned' && 'pinned' || steps.target.outputs.version }}
         run: |
@@ -173,6 +222,7 @@ jobs:
         id: types
         if: steps.target.outputs.incomplete != 'true' && steps.install.outputs.incomplete != 'true'
         continue-on-error: true
+        timeout-minutes: 10
         run: |
           npm run typecheck
           node scripts/check-dist.mjs --bundle-only
@@ -181,6 +231,7 @@ jobs:
         id: tests
         if: steps.target.outputs.incomplete != 'true' && steps.install.outputs.incomplete != 'true'
         continue-on-error: true
+        timeout-minutes: 15
         run: npm test
 
       # Pure semver over the resolved version: it runs whenever there is one,
@@ -190,6 +241,7 @@ jobs:
         id: admission
         if: ${{ !cancelled() && steps.target.outputs.version != '' }}
         continue-on-error: true
+        timeout-minutes: 5
         env:
           VERSION: ${{ steps.target.outputs.version }}
         run: node scripts/harness-target.mjs "$VERSION" --admits
@@ -198,6 +250,7 @@ jobs:
         id: smoke
         if: matrix.smoke && steps.target.outputs.incomplete != 'true' && steps.install.outputs.incomplete != 'true'
         continue-on-error: true
+        timeout-minutes: 30
         env:
           VERSION: ${{ steps.target.outputs.version }}
           SMOKE_RESULT: ${{ runner.temp }}/smoke.jsonl
@@ -207,6 +260,7 @@ jobs:
           node scripts/smoke-boot.mjs --dsh "$VERSION"
 
       - if: always() && steps.target.outputs.version != ''
+        timeout-minutes: 5
         uses: actions/upload-artifact@v4
         with:
           name: harness-${{ matrix.cell }}
@@ -214,14 +268,17 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
+      # Not when someone cancelled the run: a stage cut off otherwise is a failure.
       - name: Verdict
-        if: always()
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
         uses: actions/github-script@v7
         env:
           VERSION: ${{ steps.target.outputs.version }}
           INCOMPLETE: ${{ steps.target.outputs.incomplete == 'true' || steps.install.outputs.incomplete == 'true' }}
           EXPECTED: ${{ matrix.smoke && 'types,tests,admission,smoke' || 'types,tests,admission' }}
           REPORT: ${{ github.event_name == 'schedule' || inputs.report }}
+          JOB_STATUS: ${{ job.status }}
           STAGE_resolve: ${{ steps.target.outcome }}
           STAGE_install: ${{ steps.install.outcome }}
           STAGE_types: ${{ steps.types.outcome }}
@@ -242,7 +299,8 @@ jobs:
     if: github.event_name == 'schedule' || inputs.desktop-bytes
     name: harness@desktop-bytes
     runs-on: macos-latest
-    timeout-minutes: 45
+    # The sum of the step timeouts below (110), plus margin for the cache's post step.
+    timeout-minutes: 125
     permissions:
       contents: read
       issues: write
@@ -250,23 +308,28 @@ jobs:
       CELL: desktop-bytes
     steps:
       - uses: actions/checkout@v4
+        timeout-minutes: 5
         with:
           ref: ${{ inputs.ref || github.ref }}
           persist-credentials: false
 
       - uses: actions/setup-node@v4
+        timeout-minutes: 5
         with:
           node-version: '24'
           cache: npm
 
       - run: npm ci --ignore-scripts --no-audit --no-fund
+        timeout-minutes: 10
 
       - name: Read the mac-arm64 feed
         id: feed
+        timeout-minutes: 5
         run: node scripts/harness-target.mjs --feed mac-arm64
 
       - uses: actions/cache@v4
         id: app
+        timeout-minutes: 15
         with:
           path: ~/dsh-desktop
           # hashFiles() only sees the workspace; the feed's digest names the build exactly.
@@ -275,6 +338,7 @@ jobs:
       - name: Download and verify the shipped zip
         id: download
         if: steps.app.outputs.cache-hit != 'true'
+        timeout-minutes: 25
         env:
           URL: ${{ steps.feed.outputs.path }}
           SHA512: ${{ steps.feed.outputs.sha512 }}
@@ -288,6 +352,7 @@ jobs:
 
       - name: Cross-check the bundled runtime against the feed
         id: runtime
+        timeout-minutes: 5
         env:
           VERSION: ${{ steps.feed.outputs.version }}
         run: |
@@ -311,6 +376,7 @@ jobs:
       - name: Boot smoke on the desktop runtime
         id: smoke
         continue-on-error: true
+        timeout-minutes: 30
         env:
           EXE: ${{ steps.runtime.outputs.exe }}
           HARNESS: ${{ steps.runtime.outputs.harness }}
@@ -325,6 +391,7 @@ jobs:
           ELECTRON_RUN_AS_NODE=1 "$EXE" scripts/smoke-boot.mjs --harness-dir "$HARNESS"
 
       - if: always()
+        timeout-minutes: 5
         uses: actions/upload-artifact@v4
         with:
           name: harness-desktop-bytes
@@ -332,14 +399,17 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
+      # Not when someone cancelled the run: a stage cut off otherwise is a failure.
       - name: Verdict
-        if: always()
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
         uses: actions/github-script@v7
         env:
           VERSION: ${{ steps.feed.outputs.version }}
           INCOMPLETE: 'false'
           EXPECTED: feed,runtime,smoke
           REPORT: ${{ github.event_name == 'schedule' || inputs.report }}
+          JOB_STATUS: ${{ job.status }}
           STAGE_feed: ${{ steps.feed.outcome }}
           STAGE_download: ${{ steps.download.outcome }}
           STAGE_runtime: ${{ steps.runtime.outcome }}

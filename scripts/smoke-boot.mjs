@@ -40,6 +40,9 @@
  *   [--timeout-ms <n>]      how long `dsh web` may take to announce its URL (default 240 s)
  *   [--install-timeout-ms <n>]  how long the plain `npm install` of the harness may take
  *                           before legacy peer mode is used instead (default 120 s)
+ *   [--command-timeout-ms <n>]  how long any other command may run before it is
+ *                           killed and its stage fails (default 600 s); every
+ *                           request to the booted server gets 30 s
  *   [--graph released|today]  with --dsh: resolve the harness's floating
  *                           dependencies as of its release — before the next
  *                           @deepseek-ai/dsh was published (default) — or as
@@ -81,6 +84,7 @@ const { values } = parseArgs({
     'accept-risk': { type: 'boolean', default: false },
     'timeout-ms': { type: 'string', default: '240000' },
     'install-timeout-ms': { type: 'string', default: '120000' },
+    'command-timeout-ms': { type: 'string', default: '600000' },
     graph: { type: 'string', default: 'released' },
     keep: { type: 'boolean', default: false },
   },
@@ -89,6 +93,9 @@ const root = fileURLToPath(new URL('..', import.meta.url))
 /** The plugin under test: the checkout, or the manifest inside `--tarball`. */
 let pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
 const timeoutMs = Number(values['timeout-ms'])
+const commandTimeoutMs = Number(values['command-timeout-ms'])
+/** A server that accepts a request and never answers must fail its stage, not hang the job. */
+const FETCH_TIMEOUT_MS = 30_000
 /** pnpm 10 answers `dsh plugin add` with ERR_PNPM_ADDING_TO_ROOT; the desktop runtime ships 11.7.0. */
 const DEFAULT_PNPM = '11.7.0'
 
@@ -110,12 +117,23 @@ function fail(name, detail) {
   throw new StageFailed(name)
 }
 
+/** Run a command to completion; one still running after its timeout is killed and reported as such. */
 function run(command, args, options = {}) {
-  const r = spawnSync(command, args, { encoding: 'utf8', env, maxBuffer: 64 * 1024 * 1024, ...options })
+  const r = spawnSync(command, args, { encoding: 'utf8', env, maxBuffer: 64 * 1024 * 1024, timeout: commandTimeoutMs, killSignal: 'SIGKILL', ...options })
+  if (r.error?.code === 'ETIMEDOUT') r.stderr = `${r.stderr ?? ''}\n${command} ${args[0] ?? ''}: killed after ${Math.round((options.timeout ?? commandTimeoutMs) / 1000)} s`
   if (r.status !== 0 && !options.allowFailure) {
-    throw new Error(`${command} ${args.join(' ')} exited ${r.status ?? r.signal}\n${mask((r.stderr || r.stdout || r.error?.message || '').slice(-4000))}`)
+    throw new Error(`${command} ${args.join(' ')} ${r.error?.code === 'ETIMEDOUT' ? 'timed out' : `exited ${r.status ?? r.signal}`}\n${mask((r.stderr || r.stdout || r.error?.message || '').slice(-4000))}`)
   }
   return r
+}
+
+/** `fetch` with a deadline that covers the body as well. */
+async function request(url, init = {}) {
+  try {
+    return await fetch(url, { ...init, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })
+  } catch (error) {
+    throw new Error(`${init.method ?? 'GET'} ${new URL(url).pathname} failed: ${error?.name === 'TimeoutError' ? `no answer within ${FETCH_TIMEOUT_MS / 1000} s` : error?.message ?? error}`)
+  }
 }
 
 async function freePort() {
@@ -376,11 +394,11 @@ try {
   stage('host-activation', 'passed', booted.others.length > 0 ? `other entries did not activate: ${booted.others.length} line(s), see log` : undefined)
 
   // 6. Browser half: authenticated index, boot graph.
-  const first = await fetch(url, { redirect: 'manual' })
+  const first = await request(url, { redirect: 'manual' })
   const cookie = (first.headers.get('set-cookie') ?? '').split(';')[0]
   const headers = cookie ? { cookie } : {}
   const base = new URL('/', url)
-  const index = first.status === 200 ? first : await fetch(base, { headers })
+  const index = first.status === 200 ? first : await request(base, { headers })
   if (index.status !== 200) fail('client-graph', `the index answered ${index.status} after the token exchange (${first.status})`)
   const html = await index.text()
   // `globalThis["__DSH_BOOT__"] = …` from 0.1.1, `window.__DSH_BOOT__ = …` on 0.1.0.
@@ -398,7 +416,7 @@ try {
   //    path would not answer 405), the harness's own authentication gates
   //    them where the harness has one, and a real stage lands in this home.
   const gated = hasAdmissionCheck(dshManifest)
-  const call = (path, init = {}, authed = true) => fetch(new URL(path, base), {
+  const call = (path, init = {}, authed = true) => request(new URL(path, base), {
     redirect: 'manual', ...init, headers: { ...(authed ? headers : {}), ...(init.headers ?? {}) },
   })
   const wrong = []
@@ -440,14 +458,14 @@ try {
   const assets = [...html.matchAll(/<(?:script|link)\b[^>]*?\b(?:src|href)="([^"]+\.js(?:\?[^"]*)?)"/g)].map((m) => m[1])
   let table
   for (const asset of assets) {
-    const res = await fetch(new URL(asset, base), { headers })
+    const res = await request(new URL(asset, base), { headers })
     if (!res.ok) continue
     table = moduleTableOf(await res.text())
     if (table !== undefined) { result.moduleTable = { asset: asset.replace(/\?.*$/, '').replace(/^.*\//, ''), specifiers: table }; break }
   }
   if (table === undefined) fail('client-load', `no static module table found in the shell's scripts (${assets.join(', ') || 'none'}); smoke-boot.mjs needs to learn this train's shell`)
 
-  const bundle = await fetch(new URL(entry.url, base), { headers })
+  const bundle = await request(new URL(entry.url, base), { headers })
   if (bundle.status !== 200) fail('client-load', `the bundle answered ${bundle.status}`)
   const source = await bundle.text()
   const factories = new Map()

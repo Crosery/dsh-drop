@@ -6,10 +6,14 @@
  *
  * Reads the stage outcomes from `STAGE_<name>` environment variables (a
  * step's `outcome`: success / failure / skipped / cancelled / empty), the
- * stages the cell was expected to run from `EXPECTED`, and `CELL`, `VERSION`,
- * `INCOMPLETE`, `REPORT`.
+ * stages the cell was expected to run from `EXPECTED`, the job's status so
+ * far from `JOB_STATUS`, and `CELL`, `VERSION`, `INCOMPLETE`, `REPORT`.
  *
- * - Any failed stage fails the job.
+ * - Any failed stage fails the job. A cancelled stage is a failed one: the
+ *   workflow runs the verdict only when the run itself was not cancelled, so
+ *   a stage cut off anyway was cut off by something going wrong.
+ * - A job that failed without a failed stage — checkout, Node, `npm ci`, the
+ *   cache or the artifact upload broke — fails as the stage `job`.
  * - With REPORT=true, a failure opens an `upstream-drift` issue titled
  *   `Harness compatibility broken against @<cell>`, or comments on the open
  *   one; a cell whose every expected stage succeeded comments on that issue
@@ -33,6 +37,8 @@ const ADVICE = {
   feed: 'the desktop update feed could not be read.',
   download: 'the desktop zip did not download or did not match the feed\'s sha512.',
   runtime: 'the desktop app\'s bundled runtime is not the version its feed announces.',
+  plan: 'the cell list did not expand into a matrix, so no cell ran — read the plan job\'s log: npm\'s registry or a desktop feed did not answer (an outage, not drift), or the sweep found no version.',
+  job: 'a step outside the stages failed — checkout, Node, `npm ci`, the cache or the artifact upload; read the job log. Usually a runner or network fault, not drift.',
 }
 
 function outcomes(env) {
@@ -45,7 +51,8 @@ function outcomes(env) {
 function judge(env) {
   const stages = outcomes(env)
   const expected = String(env.EXPECTED ?? '').split(',').map((s) => s.trim()).filter(Boolean)
-  const failed = Object.entries(stages).filter(([, outcome]) => outcome === 'failure').map(([name]) => name)
+  const failed = Object.entries(stages).filter(([, outcome]) => outcome === 'failure' || outcome === 'cancelled').map(([name]) => name)
+  if (failed.length === 0 && env.JOB_STATUS === 'failure') failed.push('job')
   const incomplete = env.INCOMPLETE === 'true'
   const green = !incomplete && failed.length === 0 && expected.length > 0 && expected.every((name) => stages[name] === 'success')
   return { stages, expected, failed, incomplete, green }

@@ -250,6 +250,16 @@ test('a cell is green only when every expected stage succeeded; incomplete is ne
   assert.deepEqual([judge({ ...stages, STAGE_smoke: 'skipped', EXPECTED: expected }).green, judge({ ...stages, STAGE_smoke: 'skipped', EXPECTED: expected }).failed], [false, []])
   const incomplete = judge({ STAGE_resolve: 'success', STAGE_install: 'success', INCOMPLETE: 'true', EXPECTED: expected })
   assert.deepEqual([incomplete.incomplete, incomplete.green, incomplete.failed], [true, false, []])
+  // A stage cut off while the run went on failed; the workflow skips the verdict when the run was cancelled.
+  assert.deepEqual(judge({ ...stages, STAGE_smoke: 'cancelled', EXPECTED: expected }).failed, ['smoke'])
+  // A step outside the stages (checkout, npm ci, …) failed the job: that is a failure too, named `job`.
+  const setup = judge({ STAGE_resolve: '', STAGE_install: '', JOB_STATUS: 'failure', EXPECTED: expected })
+  assert.deepEqual([setup.failed, setup.green], [['job'], false])
+  assert.deepEqual(judge({ ...stages, STAGE_tests: 'failure', JOB_STATUS: 'failure', EXPECTED: expected }).failed, ['tests'])
+  assert.equal(judge({ ...stages, JOB_STATUS: 'success', EXPECTED: expected }).green, true)
+  // The plan reports as a cell of its own.
+  assert.deepEqual(judge({ STAGE_plan: 'failure', EXPECTED: 'plan' }).failed, ['plan'])
+  assert.equal(judge({ STAGE_plan: 'success', EXPECTED: 'plan' }).green, true)
   // Admission runs on an incomplete train too, and a refusal there is drift.
   const refusedEarly = judge({ STAGE_resolve: 'success', STAGE_install: 'skipped', STAGE_admission: 'failure', INCOMPLETE: 'true', EXPECTED: expected })
   assert.deepEqual([refusedEarly.failed, refusedEarly.green], [['admission'], false])
