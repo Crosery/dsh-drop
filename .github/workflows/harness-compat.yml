@@ -147,8 +147,8 @@ jobs:
     needs: plan
     name: harness@${{ matrix.cell }}
     runs-on: ubuntu-latest
-    # The sum of the step timeouts below (130), plus margin for the post steps.
-    timeout-minutes: 145
+    # The sum of the step timeouts below (140), plus margin for the post steps.
+    timeout-minutes: 155
     # Only the verdict writes issues, and only when reporting. A caller must
     # grant this too: a called workflow cannot hold more than its caller gives.
     permissions:
@@ -176,10 +176,12 @@ jobs:
         timeout-minutes: 10
 
       # Exit 3 is an incomplete train: the step passes, `incomplete` is set,
-      # and every later stage but admission stands down.
+      # and every later stage but admission stands down. A train missing a
+      # package the plugin needs is judged by a bare install of
+      # @deepseek-ai/dsh (up to 15 minutes; about 4 on 0.0.1-rc.1, cold).
       - name: Resolve ${{ matrix.cell }}
         id: target
-        timeout-minutes: 10
+        timeout-minutes: 20
         run: |
           set +e
           node scripts/harness-target.mjs "$CELL" --repoint
