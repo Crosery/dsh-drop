@@ -43,7 +43,7 @@ Host peer 对每个支持的元组各用一个带预发布标记的比较器：`
 
 ## 已验证序列
 
-以上结果于 2026-09-26 由 `node scripts/sweep-trains.mjs`（每一行：安装、三个类型检查、产物对 harness 模块的读取和 279 项测试）与 `node scripts/smoke-boot.mjs`（`--dsh <版本>`，按发布时的依赖图安装 harness；桌面应用用 `--harness-dir` 指向其自带的 `app.asar`）得出。每一行在两种 semver 规则下都被全部 harness peer 接纳。
+以上结果于 2026-09-26 由 `node scripts/sweep-trains.mjs`（每一行：安装、三个类型检查、产物对 harness 模块的读取和 333 项测试）与 `node scripts/smoke-boot.mjs`（`--dsh <版本>`，按发布时的依赖图安装 harness；桌面应用用 `--harness-dir` 指向其自带的 `app.asar`）得出。每一行在两种 semver 规则下都被全部 harness peer 接纳。
 
 | 序列 | 类型、产物读取、测试 | 启动冒烟 |
 | --- | --- | --- |

@@ -43,7 +43,7 @@ How a train is installed, in both the cells and the sweep (`scripts/harness-lib.
 
 ## Verified trains
 
-Produced on 2026-09-26 by `node scripts/sweep-trains.mjs` (every row: install, the three typechecks, the bundle's seed reads and the 279 tests) and `node scripts/smoke-boot.mjs` (`--dsh <version>`, the harness as released; `--harness-dir` on the desktop app's own `app.asar`). Every row is admitted by every harness peer under both semver rules.
+Produced on 2026-09-26 by `node scripts/sweep-trains.mjs` (every row: install, the three typechecks, the bundle's seed reads and the 333 tests) and `node scripts/smoke-boot.mjs` (`--dsh <version>`, the harness as released; `--harness-dir` on the desktop app's own `app.asar`). Every row is admitted by every harness peer under both semver rules.
 
 | Train | Types, bundle reads, tests | Boot smoke |
 | --- | --- | --- |
