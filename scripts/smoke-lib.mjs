@@ -88,6 +88,23 @@ export function laterHarnessVersions(times, version) {
 }
 
 /**
+ * The package, and the version when npm names one, that an install with
+ * `--before` refused as not yet published then: `No matching version found for
+ * <name>@<range> with a date before …` (ETARGET), or `No versions available for
+ * <name>` (ENOVERSIONS) when the package had no version at all by then —
+ * 0.0.1-rc.5's `dsh-shell`, first published 96 s after its `@deepseek-ai/dsh`.
+ * `undefined` for any other failure.
+ * @param {string} output
+ * @returns {{ name: string, version?: string } | undefined}
+ */
+export function refusedAsUnpublished(output) {
+  const matching = /No matching version found for (@?[^@\s]+)@(\S+?) with a date before/.exec(output)
+  if (matching !== null) return { name: matching[1], version: matching[2].replace(/^[\^~=v]+/, '') }
+  const none = /No versions available for (@?[^@\s]+?)\.?(?:\s|$)/.exec(output)
+  return none === null ? undefined : { name: none[1] }
+}
+
+/**
  * Installed harness packages (`[name, version]`) at a version of a later
  * harness train: what a caret range let into a graph meant to be the train as
  * released. Such a graph is not that train, and a smoke on it proves nothing

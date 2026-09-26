@@ -19,7 +19,7 @@ import {
 import {
   NAME_HEADER, ROUTES,
   absentInjects, classifyDiagnostics, exportedNames, inert, laterHarnessVersions, maskTokens, membersRead, missingMembers, moduleTableOf, noOpenArgs, onTrain,
-  releaseCutoff, strayPackages, strictModule,
+  refusedAsUnpublished, releaseCutoff, strayPackages, strictModule,
 } from '../scripts/smoke-lib.mjs'
 import { BATCH_ROUTE, NAME_HEADER as CONTRACT_NAME_HEADER, RESOLVE_ROUTE, STAGE_ROUTE } from '../src/contract.ts'
 
@@ -318,6 +318,12 @@ test('the smoke installs a train as released: cut off at its own release, with n
   ]
   assert.deepEqual(strayPackages(installed, later), [['@deepseek-ai/dsh-app-boot', '0.1.6-alpha.2']])
   assert.deepEqual(strayPackages(installed.filter(([name]) => name !== '@deepseek-ai/dsh-app-boot'), later), [])
+
+  // A package of the train published after the cutoff moves it later; npm words that two ways.
+  assert.deepEqual(refusedAsUnpublished('npm error code ETARGET\nnpm error notarget No matching version found for @deepseek-ai/dsh-workflow-worker-thread@^0.1.1-rc.2 with a date before 2026/8/21 20:42:19.'),
+    { name: '@deepseek-ai/dsh-workflow-worker-thread', version: '0.1.1-rc.2' })
+  assert.deepEqual(refusedAsUnpublished('npm error code ENOVERSIONS\nnpm error No versions available for @deepseek-ai/dsh-shell\nnpm error A complete log'), { name: '@deepseek-ai/dsh-shell' })
+  assert.equal(refusedAsUnpublished('npm error code ERESOLVE\nnpm error ERESOLVE unable to resolve dependency tree'), undefined)
 })
 
 test('the smoke passes --no-open only where dsh web lists it, and reports an inject target a train lacks', () => {

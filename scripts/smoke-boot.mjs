@@ -78,7 +78,7 @@ import vm from 'node:vm'
 import {
   NAME_HEADER, ROUTES,
   absentInjects, classifyDiagnostics, inert, installedExports, laterHarnessVersions, maskTokens as mask, missingMembers, moduleTableOf, noOpenArgs,
-  releaseCutoff, strayPackages,
+  refusedAsUnpublished, releaseCutoff, strayPackages,
 } from './smoke-lib.mjs'
 
 const { values } = parseArgs({
@@ -196,15 +196,17 @@ function freshProject(dir) {
 
 /**
  * A `--before` later than `before` when npm refused one of the train's own
- * packages as not yet published then: a train can be published out of order —
- * `@deepseek-ai/dsh@0.1.5-rc.3` went out seven hours before its
- * `dsh-client-ui-sidebar-documentpreview@0.1.5-rc.3`, after the next harness.
+ * packages as not yet published then ({@link refusedAsUnpublished}): a train
+ * can be published out of order — `@deepseek-ai/dsh@0.1.5-rc.3` went out seven
+ * hours before its `dsh-client-ui-sidebar-documentpreview@0.1.5-rc.3`. The
+ * cutoff moves to that version's publication; when npm names no version, to
+ * the package's version at this train, or else its first one.
  */
 function laterCutoff(output, before) {
-  const match = /No matching version found for (\S+)@(\S+) with a date before/.exec(output)
-  if (match === null) return undefined
-  const [, name, range] = match
-  const at = JSON.parse(run('npm', ['view', name, 'time', '--json'], { allowFailure: true }).stdout || '{}')[range.replace(/^[\^~=v]+/, '')]
+  const refused = refusedAsUnpublished(output)
+  if (refused === undefined) return undefined
+  const times = JSON.parse(run('npm', ['view', refused.name, 'time', '--json'], { allowFailure: true }).stdout || '{}')
+  const at = times[refused.version ?? (times[values.dsh] === undefined ? 'created' : values.dsh)]
   if (typeof at !== 'string' || at <= before) return undefined
   return new Date(Date.parse(at) + 1000).toISOString()
 }
