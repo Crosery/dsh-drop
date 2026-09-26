@@ -16,7 +16,10 @@
 #              official `dsh plugin add`, activates, answers on its three Host
 #              routes (behind the harness's login check where it has one), and
 #              its browser half is served and evaluates against the shell's
-#              module table and the train's real exports
+#              module table and the train's real exports; then, in headless
+#              Google Chrome, the app settles with the plugin active and no
+#              error of its own (client-boot), and a file dropped on the
+#              composer becomes a card in the plugin's rail (client-drop)
 #
 # v0.1.3 passed types and tests on the 0.1.6 trains and was still absent from
 # the 0.1.7 desktop app: admission refused it, and its rail read four icons
@@ -29,16 +32,25 @@
 #   desktop             what the desktop app ships now,  on PRs (not required),
 #                       read from both update feeds       daily, gates releases
 #   latest|next|alpha   npm dist-tags                    daily
-#   sweep               every published version from     weekly; its types, tests
-#                       the lowest the peers admit        and admission gate releases
+#   sweep               every published version, from    weekly; all four stages
+#                       the lowest the peers admit        on every row gate releases
+#                       (0.0.1-rc.1 on)
 #   desktop-bytes       the same smoke on the desktop    daily, gates releases
 #                       zip itself (macOS job below)
 #
-# A train published without a package this plugin needs — or not published on
-# npm yet — is "incomplete": neutral, it neither opens nor closes an issue. Only
-# npm's answers about the packages count (E404, ETARGET, ERESOLVE); a registry
-# that does not answer fails the cell, and pinned and floor are never
-# incomplete. Admission needs no install, so it runs on an incomplete train too.
+# Sweep rows boot the plugin on every version (`smoke: all`, the default) —
+# the plugin is installed into each published harness and run there; `heads`
+# (the newest build of each tuple and what the named cells resolve to) and
+# `none` remain for a dispatch. Matrix jobs run in parallel, so the sweep's
+# wall time is roughly its slowest cell, not the sum.
+#
+# A train whose @deepseek-ai/dsh does not install on its own (0.0.1-rc.1 and
+# rc.2: npm answers E404 for dsh-agent-tool-mode) — or not published on npm
+# yet — is "incomplete": neutral, it neither opens nor closes an issue, and the
+# step summary quotes npm's answer. Only npm's answers about the packages count
+# (E404, ETARGET, ERESOLVE); a registry that does not answer fails the cell,
+# and pinned and floor are never incomplete. Admission needs no install, so it
+# runs on an incomplete train too.
 #
 # Scheduled and dispatched runs report: a failing cell opens or comments on
 # the `upstream-drift` issue "Harness compatibility broken against @<cell>",
@@ -66,9 +78,9 @@ on:
         type: string
       smoke:
         description: 'Boot smoke for sweep rows'
-        default: heads
+        default: all
         type: choice
-        options: [heads, all, none]
+        options: [all, heads, none]
       desktop-bytes:
         description: 'Also smoke the desktop zip on macOS'
         default: true
@@ -84,7 +96,7 @@ on:
         default: 'pinned,floor'
       smoke:
         type: string
-        default: heads
+        default: all
       desktop-bytes:
         type: boolean
         default: false
@@ -131,15 +143,15 @@ jobs:
         timeout-minutes: 10
         env:
           CELLS: ${{ inputs.cells || (github.event.schedule == '43 6 * * 1' && 'sweep') || 'desktop,latest,next,alpha' }}
-          SMOKE: ${{ inputs.smoke || 'heads' }}
+          SMOKE: ${{ inputs.smoke || 'all' }}
         run: node scripts/harness-target.mjs --plan "$CELLS" --smoke "$SMOKE"
 
   against:
     needs: plan
     name: harness@${{ matrix.cell }}
     runs-on: ubuntu-latest
-    # The sum of the step timeouts below (130), plus margin for the post steps.
-    timeout-minutes: 145
+    # The sum of the step timeouts below (140), plus margin for the post steps.
+    timeout-minutes: 155
     # Only the verdict writes issues, and only when reporting. A caller must
     # grant this too: a called workflow cannot hold more than its caller gives.
     permissions:
@@ -167,10 +179,12 @@ jobs:
         timeout-minutes: 10
 
       # Exit 3 is an incomplete train: the step passes, `incomplete` is set,
-      # and every later stage but admission stands down.
+      # and every later stage but admission stands down. A train missing a
+      # package the plugin needs is judged by a bare install of
+      # @deepseek-ai/dsh (up to 15 minutes; about 4 on 0.0.1-rc.1, cold).
       - name: Resolve ${{ matrix.cell }}
         id: target
-        timeout-minutes: 10
+        timeout-minutes: 20
         run: |
           set +e
           node scripts/harness-target.mjs "$CELL" --repoint
@@ -232,6 +246,10 @@ jobs:
           name: ${{ inputs.tarball }}
           path: ${{ runner.temp }}/under-test
 
+      # The browser stages drive Google Chrome, which the ubuntu-latest and
+      # macos-latest images preinstall (actions/runner-images, "Browsers"):
+      # playwright-core, a devDependency, finds it as `channel: 'chrome'`;
+      # CHROME_PATH would override. No browser is downloaded.
       - name: Boot smoke
         id: smoke
         if: matrix.smoke && steps.target.outputs.incomplete != 'true' && steps.install.outputs.incomplete != 'true'
@@ -241,6 +259,7 @@ jobs:
           VERSION: ${{ steps.target.outputs.version }}
           TARBALL: ${{ inputs.tarball != '' && format('{0}/under-test/dsh-drop.tgz', runner.temp) || '' }}
           SMOKE_RESULT: ${{ runner.temp }}/smoke.jsonl
+          SMOKE_SCREENSHOTS: ${{ runner.temp }}/smoke-shots
         run: |
           # Never pack a repointed manifest: the smoke installs what a user gets.
           git checkout -- package.json package-lock.json
@@ -253,7 +272,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: harness-${{ matrix.cell }}
-          path: ${{ runner.temp }}/smoke.jsonl
+          path: |
+            ${{ runner.temp }}/smoke.jsonl
+            ${{ runner.temp }}/smoke-shots
           if-no-files-found: ignore
           retention-days: 30
 
@@ -380,6 +401,7 @@ jobs:
           PNPM_MJS: ${{ steps.runtime.outputs.pnpm }}
           TARBALL: ${{ inputs.tarball != '' && format('{0}/under-test/dsh-drop.tgz', runner.temp) || '' }}
           SMOKE_RESULT: ${{ runner.temp }}/smoke.jsonl
+          SMOKE_SCREENSHOTS: ${{ runner.temp }}/smoke-shots
         run: |
           # `dsh plugin` runs whatever pnpm is on PATH: make that the app's own.
           mkdir -p "$RUNNER_TEMP/bin"
@@ -395,7 +417,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: harness-desktop-bytes
-          path: ${{ runner.temp }}/smoke.jsonl
+          path: |
+            ${{ runner.temp }}/smoke.jsonl
+            ${{ runner.temp }}/smoke-shots
           if-no-files-found: ignore
           retention-days: 30
 

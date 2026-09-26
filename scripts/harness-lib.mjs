@@ -18,9 +18,10 @@ import { moduleTableOf } from './smoke-lib.mjs'
 export const HARNESS = '@deepseek-ai/dsh'
 
 /**
- * The oldest train with live evidence, and the one the owner runs every day.
- * It gates pull requests next to the pinned train; the sweep reaches further
- * back, down to the lowest version the peer ranges admit.
+ * The train the owner runs every day, and the oldest one with a textarea
+ * composer that pull requests are gated on next to the pinned train. The
+ * sweep reaches further back, down to the lowest version the peer ranges
+ * admit — every published one.
  */
 export const FLOOR = '0.1.1-rc.2'
 
@@ -42,22 +43,23 @@ export const NAMED_CELLS = ['pinned', 'floor', 'desktop', ...DIST_TAGS]
 
 /**
  * Harness packages without which this plugin has no surface on a train: the
- * slot registry's declaration home from 0.1.0-rc.8, the composer contract and
- * the slot primitives. A train that never published one of them is out of
- * scope (`predates`) or published incomplete, never a failure of this plugin.
- * Every harness peer is required as well — without it the Host half has
- * nothing to run on.
+ * composer contract and the slot primitives, both published on every train
+ * from 0.0.1-rc.1. Every harness peer is required as well — without it the
+ * Host half has nothing to run on. `dsh-client-ui-renderer` is not: the slot
+ * registry's declaration home from 0.1.0-rc.8, it is absent before that, the
+ * client half runs without it, and those trains typecheck against this
+ * repository's pin. A train missing a required package is judged by
+ * {@link missingVerdict}.
  */
 export const REQUIRED = [
-  '@deepseek-ai/dsh-client-ui-renderer',
   '@deepseek-ai/dsh-client-ui-conversation',
   '@deepseek-ai/dsh-client-ui-slots',
 ]
 
 /**
  * Harness packages a train declares this plugin's services in without this
- * repository pinning them, because later trains stopped publishing them: on
- * 0.1.0–0.1.1 `ctx.slots` is declared by `dsh-client-runtime`. Added at the
+ * repository pinning them, because later trains stopped publishing them: up
+ * to 0.1.1 `ctx.slots` is declared by `dsh-client-runtime`. Added at the
  * train's version when it published one.
  */
 export const TRAIN_EXTRAS = ['@deepseek-ai/dsh-client-runtime']
@@ -126,16 +128,18 @@ export function tupleHeads(versions) {
  * admission failure rather than as silence. A version already covered by a
  * named cell in the same plan is not repeated.
  *
- * Named cells always run the boot smoke. Sweep rows run it per `smoke`:
- * `heads` (default) — the floor, the newest version of each tuple and whatever
- * desktop / latest / next / alpha resolve to; `all`; or `none`.
+ * Named cells always run the boot smoke. Sweep rows run it per `smoke`: `all`
+ * (default) — the plugin is installed into every published version and run
+ * there, which a train `@deepseek-ai/dsh` cannot be installed at skips as
+ * incomplete; `heads` — the floor, the newest version of each tuple and
+ * whatever desktop / latest / next / alpha resolve to; or `none`.
  *
  * @param {string[]} cells
  * @param {{ published: string[], sweepFrom: string, pinned?: string, resolved?: Record<string, string | undefined> }} facts
  * @param {'heads' | 'all' | 'none'} smoke
  * @returns {{ cell: string, smoke: boolean }[]}
  */
-export function planCells(cells, facts, smoke = 'heads') {
+export function planCells(cells, facts, smoke = 'all') {
   if (!['heads', 'all', 'none'].includes(smoke)) throw new Error(`unknown smoke policy ${JSON.stringify(smoke)}`)
   const rows = []
   const seen = new Set()
@@ -182,10 +186,11 @@ export function parseFeed(text) {
  *
  * Every `@deepseek-ai/dsh-*` devDependency the train published moves to that
  * exact version. One it never published keeps this repository's pin — the
- * rule the compatibility table has always used for `dsh-client-store` on
- * 0.1.0/0.1.1, whose declarations do not import it — unless the plugin cannot
- * work without it ({@link REQUIRED}, or a harness peer): then it is `missing`,
- * and the train is out of scope. {@link TRAIN_EXTRAS} are added at the train's
+ * rule the compatibility table has always used for `dsh-client-store` before
+ * 0.1.2, whose declarations do not import it, and for `dsh-client-ui-renderer`
+ * before 0.1.0-rc.8 — unless the plugin cannot work without it
+ * ({@link REQUIRED}, or a harness peer): then it is `missing`, and
+ * {@link missingVerdict} decides. {@link TRAIN_EXTRAS} are added at the train's
  * version when it published them. `@deepseek-ai/cordis` follows what the
  * train's own `@deepseek-ai/dsh` ships, resolved to the exact version that
  * range installs today (`facts.exact`), so a train that moved it is compiled
@@ -255,6 +260,53 @@ export function npmErrorCode(output) {
  * that cannot be put together (ERESOLVE). Only these make a train incomplete.
  */
 export const UPSTREAM_GAPS = ['ETARGET', 'E404', 'ERESOLVE']
+
+/**
+ * npm's own words for an upstream gap, on one line: the package or version it
+ * could not find, or the graph it could not put together. `undefined` when
+ * the output shows no such answer.
+ */
+export function gapEvidence(output) {
+  const text = String(output)
+  const code = npmErrorCode(text)
+  if (code === 'E404') {
+    const spec = /The requested resource '([^']+)' could not be found/.exec(text)?.[1]
+      ?? /404 Not Found - GET \S+\/(@[^/\s]+%2[fF][^\s/]+|[^/\s]+)(?:\s|$)/.exec(text)?.[1]?.replace(/%2[fF]/, '/')
+    return `E404: npm has no ${spec ?? 'such package'}`
+  }
+  if (code === 'ETARGET') return `ETARGET: ${/No matching version found for (\S+?)\.?(?:\s|$)/.exec(text)?.[1] ?? 'a version'} is not on npm`
+  if (code === 'ERESOLVE') return 'ERESOLVE: npm cannot put the peer graph together'
+  return undefined
+}
+
+/**
+ * What a train that never published a package this plugin needs amounts to,
+ * given a bare install of `@deepseek-ai/dsh` at that version (`bare`, from
+ * {@link bareHarnessInstalls}).
+ *
+ * - The harness fails too, with npm's answer about its packages: published
+ *   incomplete upstream. Nobody can run that train, and npm's answer is the
+ *   evidence (0.0.1-rc.1 and rc.2: E404 for `dsh-agent-tool-mode`).
+ * - The harness installs: a failure. The peer ranges admit every published
+ *   train, so a runnable one without a package the plugin needs is drift.
+ * - npm did not answer, timed out or failed otherwise: a failure that proves
+ *   nothing about the train.
+ *
+ * @param {string} version
+ * @param {{ name: string, why: string }[]} missing
+ * @param {{ ok: boolean, timedOut?: boolean, output: string }} bare
+ * @returns {{ incomplete: boolean, message: string }}
+ */
+export function missingVerdict(version, missing, bare) {
+  const needs = `not published at ${version}, and this plugin needs it: ${missing.map((m) => `${m.name} (${m.why})`).join(', ')}`
+  const gap = upstreamGap(bare)
+  if (gap !== undefined) {
+    return { incomplete: true, message: `${HARNESS}@${version} does not install on its own (${gapEvidence(bare.output) ?? gap}): published incomplete upstream; also ${needs}\n${tail(bare.output, 12)}` }
+  }
+  if (bare.ok) return { incomplete: false, message: `${HARNESS}@${version} installs, yet this train lacks what the plugin needs — ${needs}` }
+  const why = bare.timedOut ? 'timed out' : npmErrorCode(bare.output) ?? 'no npm error code'
+  return { incomplete: false, message: `${needs}; a bare install of ${HARNESS}@${version} did not answer (${why}), which proves nothing about the train\n${tail(bare.output, 12)}` }
+}
 
 /**
  * The upstream gap a failed install shows, or `undefined` when it shows none:
@@ -380,8 +432,10 @@ export const SHELL = '@deepseek-ai/dsh-web-frontend'
 /**
  * The specifiers a train's Web shell answers without a graph row: the static
  * module table in {@link SHELL}'s built assets at exactly that version, as
- * the train was released. 0.1.0 and 0.1.1 answer seven specifiers and no
- * `@deepseek-ai/dsh-client-store`; 0.1.5 on answer nine.
+ * the train was released. 0.0.1-rc.5 to 0.1.0-rc.7 answer ten specifiers
+ * (with `dsh-client-web-react`, `-ui-attachment` and `-schema-form`),
+ * 0.1.0-rc.8 and 0.1.1 seven, neither of them `@deepseek-ai/dsh-client-store`;
+ * 0.1.5 on answer nine.
  * @returns {{ table: string[], asset: string }}
  */
 export function shellModuleTable(version) {
@@ -439,7 +493,7 @@ export function bareHarnessInstalls(version, work) {
  * conflict this repository causes stays a failure, and so does a network
  * error or a timeout anywhere: those prove nothing about the train.
  *
- * @returns {{ ok: boolean, incomplete: boolean, via: string, output: string, manifest: object }}
+ * @returns {{ ok: boolean, incomplete: boolean, evidence?: string, via: string, output: string, manifest: object }}
  */
 export function installTrain(dir, manifest, version) {
   const fresh = () => {
@@ -481,7 +535,7 @@ export function installTrain(dir, manifest, version) {
   const bare = bareHarnessInstalls(version)
   const gap = upstreamGap(bare)
   const verdict = bare.ok ? 'installs, so the failure is this repository\'s'
-    : gap !== undefined ? `fails too (${gap}): published incomplete`
+    : gap !== undefined ? `fails too (${gapEvidence(bare.output) ?? gap}): published incomplete`
       : `did not answer (${bare.timedOut ? 'timed out' : npmErrorCode(bare.output) ?? 'no npm error code'}), which proves nothing`
-  return { ...failed, incomplete: gap !== undefined, output: `${last.output}\n--- bare ${HARNESS}@${version} ${verdict}:\n${tail(bare.output, 12)}` }
+  return { ...failed, incomplete: gap !== undefined, evidence: gap === undefined ? undefined : gapEvidence(bare.output) ?? gap, output: `${last.output}\n--- bare ${HARNESS}@${version} ${verdict}:\n${tail(bare.output, 12)}` }
 }

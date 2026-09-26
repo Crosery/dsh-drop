@@ -20,15 +20,17 @@ for (const [name, range] of Object.entries(pkg.peerDependencies)) {
 }
 
 // The compatibility table and the manifests are two statements of the same
-// claim, and only one of them is executable. Every train
-// docs/harness-compatibility.md lists as verified must be admitted by each host
-// peer range — under BOTH node-semver rules, because dsh ≥0.1.7 checks peers
-// with `includePrerelease` at install and at boot while npm and pnpm use the
-// default — and nothing outside the documented support may be: an unverified
-// combination that resolves is the failure this catches, and it is invisible
-// to `npm install`. `scripts/sweep-trains.mjs` produces the verified list.
-const VERIFIED_TRAINS = [
-  '0.1.0-rc.8',
+// claim, and only one of them is executable. Every published @deepseek-ai/dsh
+// version is admitted by each host peer range — under BOTH node-semver rules,
+// because dsh ≥0.1.7 checks peers with `includePrerelease` at install and at
+// boot while npm and pnpm use the default — because CI installs the plugin into
+// every one of them and runs it (docs/harness-compatibility.md; the sweep and
+// the smoke produce the evidence). Nothing unpublished may be admitted: an
+// unverified combination that resolves is the failure this catches, and it is
+// invisible to `npm install`.
+const PUBLISHED_TRAINS = [
+  '0.0.1-rc.1', '0.0.1-rc.2', '0.0.1-rc.5',
+  '0.1.0-rc.2', '0.1.0-rc.3', '0.1.0-rc.6', '0.1.0-rc.7', '0.1.0-rc.8',
   '0.1.1-rc.1', '0.1.1-rc.2',
   '0.1.2-alpha.2', '0.1.2-alpha.3', '0.1.2-alpha.4', '0.1.2-alpha.5', '0.1.2-rc.1',
   '0.1.3-alpha.2',
@@ -37,29 +39,44 @@ const VERIFIED_TRAINS = [
   '0.1.7-alpha.1', '0.1.7-alpha.2', '0.1.7-rc.1', '0.1.7-rc.2',
 ]
 /**
- * Published builds outside the support; each must stay out. 0.0.1 and
- * 0.1.0-rc.2–rc.7 predate the composer's attachment seat, and 0.1.8 is
- * admitted only once a sweep has verified it.
+ * Admitted, but `@deepseek-ai/dsh` itself cannot be installed: it depends on
+ * `@deepseek-ai/dsh-agent-tool-mode`, which npm answers E404 for. CI reports
+ * them as incomplete upstream; every other published train is installed and run.
+ */
+const UNINSTALLABLE = ['0.0.1-rc.1', '0.0.1-rc.2']
+const INSTALLABLE = PUBLISHED_TRAINS.filter((train) => !UNINSTALLABLE.includes(train))
+/**
+ * Versions nobody has published, each of which must stay out: the next
+ * tuples are admitted only once a sweep has installed and run them, and 0.1.4
+ * was never published at all.
  */
 const OUTSIDE = [
-  '0.0.1-rc.1', '0.0.1-rc.2', '0.0.1-rc.5',
-  '0.1.0-rc.2', '0.1.0-rc.3', '0.1.0-rc.6', '0.1.0-rc.7',
-  '0.1.8-alpha.0', '0.1.8-rc.0', '0.1.8', '0.2.0',
+  '0.0.1-alpha.1', '0.0.2-alpha.0', '0.0.2', '0.1.4-alpha.0', '0.1.4-rc.1', '0.1.4',
+  '0.1.8-alpha.0', '0.1.8-rc.0', '0.1.8', '0.2.0-alpha.0', '0.2.0', '1.0.0',
 ]
 for (const [name, range] of Object.entries(pkg.peerDependencies)) {
   if (name === '@deepseek-ai/cordis') continue
-  for (const train of VERIFIED_TRAINS) {
-    assert.ok(semver.satisfies(train, range), `${name} rejects the verified train ${train}`)
+  for (const train of PUBLISHED_TRAINS) {
+    assert.ok(semver.satisfies(train, range), `${name} rejects the published train ${train}`)
     assert.ok(semver.satisfies(train, range, { includePrerelease: true }), `${name} rejects ${train} under includePrerelease (dsh ≥0.1.7 install/boot check)`)
   }
   for (const train of OUTSIDE) {
-    assert.ok(!semver.satisfies(train, range), `${name} admits ${train} under the default rule, which is outside the documented support`)
-    assert.ok(!semver.satisfies(train, range, { includePrerelease: true }), `${name} admits ${train} under includePrerelease (dsh ≥0.1.7 would load it), which is outside the documented support`)
+    assert.ok(!semver.satisfies(train, range), `${name} admits ${train} under the default rule, which nobody has published or verified`)
+    assert.ok(!semver.satisfies(train, range, { includePrerelease: true }), `${name} admits ${train} under includePrerelease (dsh ≥0.1.7 would load it), which nobody has published or verified`)
+  }
+  // One comparator pair per tuple, closed at the next patch: `>=X <M.m.(p+1)-0`.
+  // An open or multi-tuple comparator would admit trains nobody has run.
+  for (const set of new semver.Range(range).set) {
+    const [low, high] = set
+    assert.ok(set.length === 2 && low.operator === '>=' && high.operator === '<', `${name}: ${set.map(String).join(' ')} is not a closed >= … < … pair`)
+    const next = `${low.semver.major}.${low.semver.minor}.${low.semver.patch + 1}-0`
+    assert.equal(high.semver.version, next, `${name}: ${set.map(String).join(' ')} spans more than the ${low.semver.major}.${low.semver.minor}.${low.semver.patch} tuple`)
   }
 }
 // The CI floor cell and the sweep's start are derived from the same facts.
-assert.ok(VERIFIED_TRAINS.includes(FLOOR), `the CI floor ${FLOOR} is not a verified train`)
-assert.equal(sweepStart(harnessPeers(pkg)), VERIFIED_TRAINS[0], 'the sweep must start at the oldest verified train')
+assert.ok(INSTALLABLE.includes(FLOOR), `the CI floor ${FLOOR} is not an installable train`)
+const start = sweepStart(harnessPeers(pkg))
+assert.ok(semver.lte(start, PUBLISHED_TRAINS[0]), `the sweep must start at or below the oldest published train ${PUBLISHED_TRAINS[0]}, not ${start}`)
 
 // The browser bundle must not reach into the UI-primitives module: its icon
 // exports were renamed between trains (`IconCloseOutline16` → `…Regular`), and
@@ -78,7 +95,7 @@ for (const file of readdirSync('docs').filter(f => f.endsWith('.md') && !f.endsW
 // the desktop install path, and a pinned install of THIS version.
 for (const file of ['README.md','README.zh.md']) {
   const text = read(file)
-  const claims = ['512', '64 KiB', VERIFIED_TRAINS[0], FLOOR, VERIFIED_TRAINS.at(-1), 'crosery-drop', '`drop`',
+  const claims = ['512', '64 KiB', INSTALLABLE[0], FLOOR, INSTALLABLE.at(-1), 'crosery-drop', '`drop`',
     'releases/latest/download/dsh-drop.tgz', `download/v${pkg.version}`, 'folderMaxFiles']
   for (const claim of claims) assert.ok(text.includes(claim), file + ' omits ' + claim)
   assert.ok(file.endsWith('.zh.md') ? text.includes('插件 → 添加插件') : text.includes('Plugins → Add plugin'), file + ' omits the desktop install path')
@@ -110,12 +127,16 @@ for (const [file, text] of [['ci.yml', ci], ['release.yml', release]]) {
 }
 assert.match(release, /gate:\s+needs: pack\b/, 'release.yml must pack before its gate')
 assert.match(release, /needs: \[pack, gate\]/, 'release.yml must wait for its gate')
-assert.match(release, /cells: pinned,floor,desktop,sweep/, 'the release gate must cover pinned, floor, desktop and the sweep')
+assert.match(release, /cells: pinned,floor,desktop,sweep\s+smoke: all\b/, 'the release gate must cover pinned, floor, desktop and the sweep, and boot the asset on every swept version')
+assert.match(compat, /SMOKE: \$\{\{ inputs\.smoke \|\| 'all' \}\}/, 'the scheduled sweep must boot the plugin on every version')
 assert.match(release, /desktop-bytes: true/, 'the release gate must smoke the desktop bytes')
 assert.match(release, /tarball: release-asset/, 'the release gate must smoke the packed asset, not a fresh pack of the tree')
 assert.match(release, /r\.sha256 !== asset/, 'the release must refuse an asset whose bytes the gate did not smoke')
 assert.match(release, /dsh-drop\.tgz SHA256SUMS/, 'a release attaches dsh-drop.tgz and SHA256SUMS')
 assert.match(compat, /--tarball "\$TARBALL"/, 'harness-compat.yml must smoke the tarball it is given')
+// The smoke runs the plugin in a real browser; its browser comes with the runner, its driver with npm ci.
+for (const stage of ['client-boot', 'client-drop']) assert.ok(read('scripts/smoke-boot.mjs').includes(`fail('${stage}'`), 'smoke-boot.mjs lost the ' + stage + ' stage')
+assert.ok(semver.valid(pkg.devDependencies['playwright-core']), 'playwright-core must be an exact devDependency: the browser stages drive Chrome through it')
 for (const stage of ['smoke-boot.mjs', 'check-dist.mjs --bundle-only --train "$VERSION"', '--admits', 'harness-verdict.cjs', 'desktop-bytes', "harness-verdict.cjs').unreported("]) assert.ok(compat.includes(stage), 'harness-compat.yml lost ' + stage)
 // The catch-all needs the run's job list; a caller cannot grant a called workflow less than it declares.
 assert.match(compat, /unreported:\s+needs: \[plan, against, desktop-bytes\][\s\S]*?actions: read/, 'the unreported job must follow every job and read the run\'s jobs')

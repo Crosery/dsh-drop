@@ -32,6 +32,24 @@ const SHEET = `
   padding: 4px 12px 0;
 }
 
+/* On the trains without that seat the rail is a dock row stacked above the
+   card, laid out like the shipped queue row: inset from the card's edges by
+   the dock inset, a tab surface open at the bottom, and tucked 3px under the
+   card so the two read as one piece. The fallbacks only matter outside the
+   composer, where the variables are unset. */
+.dshdrop-rail-wrap[data-placement="dock"] {
+  box-sizing: border-box;
+  flex: none;
+  width: calc(100% - 2 * var(--dsh-composer-side-clearance, 0px) - 2 * var(--dsh-composer-dock-inset, 12px));
+  max-width: calc(var(--dsh-composer-card-max-width, 100%) - 2 * var(--dsh-composer-dock-inset, 12px));
+  margin: 0 auto calc(0px - var(--dsh-composer-stack-gap, 6px) - 3px);
+  padding: 8px 10px 11px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-bottom: none;
+  border-radius: 12px 12px 0 0;
+  background: var(--dsw-specific-tip, var(--dsw-specific-input-major));
+}
+
 .dshdrop-rail {
   display: flex;
   gap: 10px;

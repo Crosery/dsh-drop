@@ -11,6 +11,7 @@
 
 import { formatDropBytes } from '../preview.ts'
 import type { FolderLimit, FolderLimits } from '../contract.ts'
+import type { ImageLimits, ImageRefusal } from './early-composer.ts'
 
 /** The message set one locale supplies. */
 export interface Messages {
@@ -30,6 +31,12 @@ export interface Messages {
   waiting: (count: number) => string
   /** The staged mentions could not be added to the outgoing message. */
   attachFailed: string
+  /**
+   * Dropped images the composer's limits refused. Raised only on the early
+   * trains, where this plugin runs the composer's checks itself; the wording
+   * is the composer's own.
+   */
+  imageRefused: (reason: ImageRefusal, limits: ImageLimits | undefined) => string
   /** Overlay: the invitation. */
   overlayTitle: string
   /** Overlay: what happens to each kind of file. */
@@ -72,6 +79,13 @@ const zh: Messages = {
   blocked: '当前输入框暂不接收文件',
   waiting: (count) => `还有 ${count} 个附件在上传，请等上传完成再发送`,
   attachFailed: '未能把附件加入这条消息，请重试',
+  imageRefused: (reason, limits) => {
+    if (reason === 'type') return '仅支持 PNG、JPG、WebP、GIF 格式的图片'
+    if (limits === undefined || reason === 'busy') return '当前输入框暂不接收文件'
+    if (reason === 'count') return `一条消息最多添加 ${limits.maxImagesPerMessage} 张图片`
+    if (reason === 'size') return `单张图片不能超过 ${formatDropBytes(limits.maxImageBytes)}`
+    return `图片总大小超过 ${formatDropBytes(limits.maxMessageImageBytes)}，请移除部分图片`
+  },
   overlayTitle: '拖入文件',
   overlayDesc: '图片作为附件发送，其他文件和文件夹在发送时附上 @ 路径',
   overlayLimits: (count, size) => `图片最多 ${count} 张，每张不超过 ${size}`,
@@ -91,6 +105,13 @@ const en: Messages = {
     ? 'Waiting for 1 upload to finish; send again when it is done'
     : `Waiting for ${count} uploads to finish; send again when they are done`,
   attachFailed: 'Could not add the attachments to this message; try again',
+  imageRefused: (reason, limits) => {
+    if (reason === 'type') return 'Only PNG, JPG, WebP, and GIF images are supported'
+    if (limits === undefined || reason === 'busy') return 'This composer is not taking files right now'
+    if (reason === 'count') return `A message can include up to ${limits.maxImagesPerMessage} images`
+    if (reason === 'size') return `Each image must be smaller than ${formatDropBytes(limits.maxImageBytes)}`
+    return `Images exceed ${formatDropBytes(limits.maxMessageImageBytes)} in total; remove some and try again`
+  },
   overlayTitle: 'Drop files here',
   overlayDesc: 'Images attach as images; other files and folders are sent as @ paths',
   overlayLimits: (count, size) => `Up to ${count} images, ${size} each`,

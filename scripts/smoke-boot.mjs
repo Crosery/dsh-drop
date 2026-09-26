@@ -21,9 +21,16 @@
  *   requires a specifier the shell's module table cannot answer, or reads a
  *   named export a harness seed module no longer has (v0.1.3's rail read four
  *   icons 0.1.7 renamed: it loaded, and crashed at the first card).
+ * - a browser half that loads and still breaks the page: v0.2.0 on the trains
+ *   before 0.1.0-rc.8 passed every stage above, and in a browser its document
+ *   drop listeners swallowed every file dropped on the composer with "Open a
+ *   session before dropping files". The last two stages run the page in
+ *   headless Google Chrome (playwright-core, a devDependency; `channel:
+ *   'chrome'`, or `--browser` / CHROME_PATH) with a profile inside this run.
  *
  * Stages, in order: harness → pnpm → install → boot → host-activation →
- * client-graph → host-routes → client-load → client-exports.
+ * client-graph → host-routes → client-load → client-exports → client-boot →
+ * client-drop.
  *
  * Everything runs in a throwaway DSH_HOME under the OS temp directory; the
  * script refuses any other home, so running it on a workstation cannot touch a
@@ -44,13 +51,21 @@
  *                           killed and its stage fails (default 600 s); every
  *                           request to the booted server gets 30 s
  *   [--graph released|today]  with --dsh: resolve the harness's floating
- *                           dependencies as of its release — before the next
- *                           @deepseek-ai/dsh was published (default) — or as
- *                           of today. The cordis family floats under every
+ *                           dependencies as of its release — just after its
+ *                           own @deepseek-ai/dsh went out, with no package of a
+ *                           later train in the tree (default) — or as of
+ *                           today. The cordis family floats under every
  *                           train: a fresh install of 0.1.1-rc.2 today (e.g.
  *                           cordis-plugin-hmr 1.0.19) stops at boot with "user
  *                           patch-layer watching requires the Cordis HMR
- *                           service", plugin or not.
+ *                           service", plugin or not; and the harness's own
+ *                           caret ranges take the next prerelease of the same
+ *                           tuple.
+ *   [--browser <path>]      the Chrome the browser stages drive (default CHROME_PATH,
+ *                           else the installed Google Chrome)
+ *   [--screenshots <dir>]   keep the browser stages' screenshots there (also
+ *                           SMOKE_SCREENSHOTS): of a browser stage that fails, and
+ *                           of the composer after the drop
  *   [--keep]
  *   [--accept-risk]         diagnostic only: grant the exact-version exemption
  *                           first, to separate "peer range too narrow" from
@@ -74,7 +89,8 @@ import { parseArgs } from 'node:util'
 import vm from 'node:vm'
 import {
   NAME_HEADER, ROUTES,
-  classifyDiagnostics, inert, installedExports, maskTokens as mask, missingMembers, moduleTableOf,
+  FIRST_RUN_DISMISS, absentInjects, blamesPlugin, bootState, classifyDiagnostics, dropVerdict, inert, installedExports, laterHarnessVersions, maskTokens as mask,
+  missingMembers, moduleLines, moduleTableOf, modulesServedBy, noOpenArgs, refusedAsUnpublished, releaseCutoff, strayPackages,
 } from './smoke-lib.mjs'
 
 const { values } = parseArgs({
@@ -89,6 +105,8 @@ const { values } = parseArgs({
     'command-timeout-ms': { type: 'string', default: '600000' },
     graph: { type: 'string', default: 'released' },
     keep: { type: 'boolean', default: false },
+    browser: { type: 'string' },
+    screenshots: { type: 'string' },
   },
 })
 const root = fileURLToPath(new URL('..', import.meta.url))
@@ -106,6 +124,12 @@ const home = join(work, 'home')
 assert.ok(home.startsWith(realpathSync(tmpdir())) && !home.startsWith(join(homedir(), '.dsh')), 'refusing a non-temporary DSH_HOME')
 const env = { ...process.env, DSH_HOME: home, DSH_TELEMETRY_DISABLED: '1', NO_COLOR: '1', FORCE_COLOR: '0' }
 const result = { plugin: `${pkg.name}@${pkg.version}`, dsh: undefined, runtime: undefined, strict: !values['accept-risk'], stages: {} }
+
+/** `--no-open` where this train's `dsh web` has it; see {@link noOpenArgs}. */
+function noOpenFlag(dshBin, childEnv) {
+  const help = spawnSync(process.execPath, [dshBin, '--profile', 'web', '--help'], { env: childEnv, encoding: 'utf8', timeout: 60_000 })
+  return noOpenArgs(`${help.stdout ?? ''}${help.stderr ?? ''}`)
+}
 
 function stage(name, outcome, detail) {
   result.stages[name] = { outcome, ...(detail === undefined ? {} : { detail }) }
@@ -172,20 +196,32 @@ function hasAdmissionCheck(from) {
   return existsSync(main) && /\brequestRejection\s*\(/.test(readFileSync(main, 'utf8'))
 }
 
+/** When each `@deepseek-ai/dsh` version was published, as npm records it. */
+function harnessTimes() {
+  return JSON.parse(run('npm', ['view', '@deepseek-ai/dsh', 'time', '--json']).stdout)
+}
+
 /**
- * When the next `@deepseek-ai/dsh` was published after `version` — the moment
- * the train stopped being the newest, and the `--before` that resolves its
- * floating dependencies as a user who installed it then got them. `undefined`
- * for the newest version.
+ * A directory of shims that answer "where is Documents" with this run's home.
+ * 0.1.7 asks `osascript` on macOS and `xdg-user-dir` on Linux rather than
+ * reading HOME, so without them the smoke would create
+ * `~/Documents/deepseek-harness/default-workspace` in the real account. Any
+ * other use goes through to the real command.
+ * @returns the directory to put first on the boot's PATH.
  */
-function supersededAt(version) {
-  const times = JSON.parse(run('npm', ['view', '@deepseek-ai/dsh', 'time', '--json']).stdout)
-  const own = times[version]
-  if (own === undefined) fail('harness', `@deepseek-ai/dsh@${version} is not on npm`)
-  return Object.entries(times)
-    .filter(([key, at]) => key !== 'created' && key !== 'modified' && at > own)
-    .map(([, at]) => at)
-    .sort()[0]
+function documentsShims(userHome) {
+  const bin = join(work, 'shims')
+  mkdirSync(bin, { recursive: true })
+  const real = (name) => spawnSync('sh', ['-c', `command -v ${name}`], { encoding: 'utf8', env }).stdout.trim()
+  const shim = (name, test, fallback) => writeFileSync(join(bin, name), [
+    '#!/bin/sh',
+    `case "$*" in ${test}) printf '%s\\n' ${JSON.stringify(join(userHome, 'Documents'))}; exit 0 ;; esac`,
+    fallback === '' ? 'exit 1' : `exec ${JSON.stringify(fallback)} "$@"`,
+    '',
+  ].join('\n'), { mode: 0o755 })
+  shim('osascript', '*"path to documents folder"*', real('osascript'))
+  shim('xdg-user-dir', 'DOCUMENTS', real('xdg-user-dir'))
+  return bin
 }
 
 /** An empty project to install the harness into. */
@@ -197,15 +233,17 @@ function freshProject(dir) {
 
 /**
  * A `--before` later than `before` when npm refused one of the train's own
- * packages as not yet published then: a train can be published out of order —
- * `@deepseek-ai/dsh@0.1.5-rc.3` went out seven hours before its
- * `dsh-client-ui-sidebar-documentpreview@0.1.5-rc.3`, after the next harness.
+ * packages as not yet published then ({@link refusedAsUnpublished}): a train
+ * can be published out of order — `@deepseek-ai/dsh@0.1.5-rc.3` went out seven
+ * hours before its `dsh-client-ui-sidebar-documentpreview@0.1.5-rc.3`. The
+ * cutoff moves to that version's publication; when npm names no version, to
+ * the package's version at this train, or else its first one.
  */
 function laterCutoff(output, before) {
-  const match = /No matching version found for (\S+)@(\S+) with a date before/.exec(output)
-  if (match === null) return undefined
-  const [, name, range] = match
-  const at = JSON.parse(run('npm', ['view', name, 'time', '--json'], { allowFailure: true }).stdout || '{}')[range.replace(/^[\^~=v]+/, '')]
+  const refused = refusedAsUnpublished(output)
+  if (refused === undefined) return undefined
+  const times = JSON.parse(run('npm', ['view', refused.name, 'time', '--json'], { allowFailure: true }).stdout || '{}')
+  const at = times[refused.version] ?? times[values.dsh] ?? times['created']
   if (typeof at !== 'string' || at <= before) return undefined
   return new Date(Date.parse(at) + 1000).toISOString()
 }
@@ -213,52 +251,76 @@ function laterCutoff(output, before) {
 /**
  * Install `spec` into `dir` the way a user gets it, and say how.
  *
- * As released (`--graph released`, the default): `--before` the next harness
- * publication, moved later if the train's own packages went out after it.
- * Install scripts run, as for a user: 0.1.3's session store needs its native
- * addon built. The plain peer graph first; early prereleases carry caret peers
- * that pull a later prerelease of the same tuple, and npm then either answers
- * ERESOLVE or — 0.1.1-rc.2 under npm 11 — takes minutes of CPU to settle.
- * @deepseek-ai/dsh lists every package it composes as a dependency, so legacy
- * peer mode plus the peers it leaves unmet, each at its declared range, is the
- * same harness.
+ * As released (`--graph released`, the default): `--before` one second after
+ * the train's own `@deepseek-ai/dsh` went out ({@link releaseCutoff}), moved
+ * later whenever npm refuses one of the train's own packages as not yet
+ * published then; the installed tree must then hold no package of a later
+ * harness train. Install scripts run, as for a user: 0.1.3's session store
+ * needs its native addon built. The plain peer graph first; early prereleases
+ * carry caret peers, and npm then either answers ERESOLVE or — 0.1.1-rc.2
+ * under npm 11 — takes minutes of CPU to settle. @deepseek-ai/dsh lists every
+ * package it composes as a dependency, so legacy peer mode plus the peers it
+ * leaves unmet, each at its declared range, is the same harness.
  */
 function installHarness(spec, dir) {
   let before
-  if (values.graph === 'released') before = supersededAt(values.dsh)
-  else if (values.graph !== 'today') fail('harness', `--graph must be released or today, not ${values.graph}`)
+  let later = new Set()
+  if (values.graph === 'released') {
+    const times = harnessTimes()
+    if (times[values.dsh] === undefined) fail('harness', `@deepseek-ai/dsh@${values.dsh} is not on npm`)
+    before = releaseCutoff(times, values.dsh)
+    later = laterHarnessVersions(times, values.dsh)
+  } else if (values.graph !== 'today') fail('harness', `--graph must be released or today, not ${values.graph}`)
   const common = () => ['install', '--prefix', dir, '--no-audit', '--no-fund', ...(before === undefined ? [] : ['--before', before])]
   const describe = (how) => `npm install${before === undefined ? '' : ` --before ${before} (as released)`}${how}`
   const limit = Number(values['install-timeout-ms'])
+  /** Run one install; a refusal of the train's own package as unpublished moves the cutoff instead of failing. */
+  const install = (argv, options) => {
+    const r = run('npm', argv, { ...options, allowFailure: true })
+    if (r.status === 0) return { ok: true }
+    const output = `${r.stdout}${r.stderr}`
+    const moved = before === undefined ? undefined : laterCutoff(output, before)
+    if (moved !== undefined) { before = moved; return { ok: false, retry: true } }
+    return { ok: false, retry: false, output, settled: r.error?.code !== 'ETIMEDOUT' && r.signal === null }
+  }
 
   for (let attempt = 0; attempt < 8; attempt += 1) {
     freshProject(dir)
-    const first = run('npm', [...common(), spec], { allowFailure: true, timeout: limit, killSignal: 'SIGKILL' })
-    if (first.status === 0) return describe('')
-    const output = `${first.stdout}${first.stderr}`
-    const later = before === undefined ? undefined : laterCutoff(output, before)
-    if (later !== undefined) { before = later; continue }
-    const settled = first.error?.code !== 'ETIMEDOUT' && first.signal === null
-    if (settled && !/ERESOLVE/.test(output)) fail('harness', `npm install ${spec} failed: ${mask(output.slice(-2000))}`)
-
-    freshProject(dir)
-    run('npm', [...common(), '--legacy-peer-deps', spec])
-    let added = 0
-    for (let round = 0; round < 8; round += 1) {
-      const unmet = unmetPeers(join(dir, 'node_modules'))
-      if (unmet.size === 0) break
-      added += unmet.size
-      run('npm', [...common(), '--legacy-peer-deps', ...[...unmet].map(([name, range]) => `${name}@${range}`)])
+    const first = install([...common(), spec], { timeout: limit, killSignal: 'SIGKILL' })
+    if (first.retry) continue
+    let how = ''
+    if (!first.ok) {
+      if (first.settled && !/ERESOLVE/.test(first.output)) fail('harness', `npm install ${spec} failed: ${mask(first.output.slice(-2000))}`)
+      freshProject(dir)
+      const legacy = install([...common(), '--legacy-peer-deps', spec])
+      if (legacy.retry) continue
+      if (!legacy.ok) fail('harness', `npm install --legacy-peer-deps ${spec} failed: ${mask(legacy.output.slice(-2000))}`)
+      let added = 0
+      let moved = false
+      for (let round = 0; round < 8; round += 1) {
+        const unmet = unmetPeers(join(dir, 'node_modules'))
+        if (unmet.size === 0) break
+        added += unmet.size
+        const more = install([...common(), '--legacy-peer-deps', ...[...unmet].map(([name, range]) => `${name}@${range}`)])
+        if (more.retry) { moved = true; break }
+        if (!more.ok) fail('harness', `adding unmet peers failed: ${mask(more.output.slice(-2000))}`)
+      }
+      if (moved) continue
+      const left = unmetPeers(join(dir, 'node_modules'))
+      if (left.size > 0) fail('harness', `peers still unmet after legacy install: ${[...left.keys()].join(', ')}`)
+      how = ` --legacy-peer-deps + ${added} unmet peers at their ranges (the peer graph ${first.settled ? 'hit ERESOLVE' : `did not settle within ${Math.round(limit / 1000)} s`})`
     }
-    const left = unmetPeers(join(dir, 'node_modules'))
-    if (left.size > 0) fail('harness', `peers still unmet after legacy install: ${[...left.keys()].join(', ')}`)
-    return describe(` --legacy-peer-deps + ${added} unmet peers at their ranges (the peer graph ${settled ? 'hit ERESOLVE' : `did not settle within ${Math.round(limit / 1000)} s`})`)
+    const strays = strayPackages(installedPackages(join(dir, 'node_modules')).map((p) => [p.manifest.name, p.manifest.version]), later)
+    if (strays.length > 0) {
+      fail('harness', `the graph installed with --before ${before} is not ${spec} as released: ${strays.length} package(s) of later harness trains, e.g. ${strays.slice(0, 5).map(([n, v]) => `${n}@${v}`).join(', ')}`)
+    }
+    return describe(how)
   }
   fail('harness', `npm install ${spec} kept refusing its own packages as unpublished before ${before}`)
 }
 
-/** Required peers no installed package can resolve, as `name → first declared range`. */
-function unmetPeers(modules) {
+/** Every package installed under `modules`, nested ones included, with its manifest. */
+function installedPackages(modules) {
   const installed = []
   const walk = (dir) => {
     if (!existsSync(dir)) return
@@ -267,14 +329,18 @@ function unmetPeers(modules) {
       const path = join(dir, entry)
       if (entry.startsWith('@')) { walk(path); continue }
       if (!existsSync(join(path, 'package.json'))) continue
-      installed.push(path)
+      installed.push({ path, manifest: JSON.parse(readFileSync(join(path, 'package.json'), 'utf8')) })
       walk(join(path, 'node_modules'))
     }
   }
   walk(modules)
+  return installed
+}
+
+/** Required peers no installed package can resolve, as `name → first declared range`. */
+function unmetPeers(modules) {
   const unmet = new Map()
-  for (const path of installed) {
-    const manifest = JSON.parse(readFileSync(join(path, 'package.json'), 'utf8'))
+  for (const { path, manifest } of installedPackages(modules)) {
     for (const [name, range] of Object.entries(manifest.peerDependencies ?? {})) {
       if (manifest.peerDependenciesMeta?.[name]?.optional) continue
       // Node resolution: this package's own node_modules, then each ancestor's.
@@ -288,6 +354,233 @@ function unmetPeers(modules) {
     }
   }
   return unmet
+}
+
+/**
+ * Chrome itself going away mid-stage — a renderer or browser crash on a
+ * loaded machine — says nothing about the plugin. One fresh attempt, with a
+ * new profile, decides; any other failure, and a second crash, stands.
+ */
+const BROWSER_GONE = /Target page, context or browser has been closed|Browser has been closed|browser has disconnected|Target closed/i
+async function withBrowserRetry(stages, runOnce) {
+  try {
+    return await runOnce(1)
+  } catch (error) {
+    const failed = stages.map((name) => result.stages[name]).filter((s) => s?.outcome === 'failed')
+    const said = `${String(error?.message ?? error)} ${JSON.stringify(failed.map((s) => s.detail))}`
+    if (!BROWSER_GONE.test(said)) throw error
+    for (const name of stages) delete result.stages[name]
+    console.log('note: Chrome closed mid-stage; the browser stages run once more with a fresh profile')
+    return await runOnce(2)
+  }
+}
+
+/**
+ * The browser stages. Everything they touch lives in this run's directory: the
+ * browser profile, the dropped file, the screenshots unless `--screenshots`
+ * (or SMOKE_SCREENSHOTS) names a directory to keep them in.
+ *
+ * - client-boot: the index, with the login cookie the token exchange above
+ *   gave where the harness has one, settles into the app — no "Failed to load
+ *   plugins", no boot page left after 90 s ({@link bootState}); this plugin's
+ *   module was served to the page; and in a 3 s quiet window after, no page
+ *   error, console error or failed request that is this plugin's
+ *   ({@link blamesPlugin}). Others are noted, not held against it.
+ * - client-drop: whatever the train needs to give the composer a session —
+ *   dismissing first-run dialogs, and on trains with no default workspace
+ *   choosing this run's home in the in-page picker — then a file dropped on
+ *   the composer through the DevTools protocol, as the OS would, must appear as
+ *   a settled card in this plugin's rail, with no "open a session first"
+ *   notice ({@link dropVerdict}).
+ */
+async function inBrowser(base, cookie, attempt = 1) {
+  let playwright
+  try {
+    playwright = await import('playwright-core')
+  } catch (error) {
+    fail('client-boot', `playwright-core is not installed (npm ci installs it as a devDependency): ${error?.message ?? error}`)
+  }
+  const chromium = playwright.chromium ?? playwright.default?.chromium
+  const profile = join(work, `browser-profile-${attempt}`)
+  assert.ok(profile.startsWith(work), 'refusing a browser profile outside this run')
+  const executablePath = values.browser ?? process.env.CHROME_PATH
+  const shots = values.screenshots ?? process.env.SMOKE_SCREENSHOTS
+  const moduleId = pkg.name
+  let context
+  let page
+  const shoot = async (name) => {
+    if (shots === undefined || page === undefined) return
+    try {
+      mkdirSync(shots, { recursive: true })
+      await page.screenshot({ path: join(shots, `${result.dsh ?? 'dsh'}-${name}.png`), timeout: 15_000 })
+    } catch {}
+  }
+  try {
+    try {
+      context = await chromium.launchPersistentContext(profile, {
+        headless: true, locale: 'en-US', viewport: { width: 1400, height: 900 }, timeout: 60_000,
+        ...(executablePath ? { executablePath } : { channel: 'chrome' }),
+      })
+    } catch (error) {
+      fail('client-boot', `could not start ${executablePath ?? 'Google Chrome (channel chrome)'}: ${String(error?.message ?? error).split('\n')[0]} — set CHROME_PATH or --browser`)
+    }
+    if (cookie) {
+      const at = cookie.indexOf('=')
+      await context.addCookies([{ name: cookie.slice(0, at), value: cookie.slice(at + 1), url: base.href }])
+    }
+    page = context.pages()[0] ?? await context.newPage()
+    page.setDefaultTimeout(30_000)
+
+    // Every report the page makes, and every script that carried this module.
+    const reports = []
+    const served = []
+    const combos = new Map()
+    page.on('pageerror', (error) => reports.push({ kind: 'page error', text: String(error?.stack ?? error) }))
+    page.on('console', (message) => {
+      if (message.type() !== 'error') return
+      const location = message.location()
+      reports.push({ kind: 'console error', text: message.text(), location: { url: location.url, line: location.lineNumber + 1 } })
+    })
+    page.on('requestfailed', (request) => reports.push({ kind: 'failed request', text: `${request.url()} ${request.failure()?.errorText ?? ''}`, request: request.url() }))
+    page.on('response', (response) => {
+      const ids = modulesServedBy(response.url())
+      if (!ids.includes(moduleId)) return
+      served.push(`${response.status()} ${ids.length > 1 ? `combo of ${ids.length}` : 'alone'}`)
+      if (response.status() >= 400) reports.push({ kind: `HTTP ${response.status()}`, text: response.url(), request: response.url() })
+      else if (ids.length > 1) combos.set(response.url(), response.text().then((text) => moduleLines(text, moduleId), () => undefined))
+    })
+    const linesOf = (() => {
+      const known = new Map()
+      return { settle: async () => { for (const [u, p] of combos) known.set(u, await p) }, of: (u) => known.get(u) }
+    })()
+    const judge = async () => {
+      await linesOf.settle()
+      const ours = []
+      const others = []
+      for (const report of reports) (blamesPlugin(report, moduleId, linesOf.of) ? ours : others).push(`${report.kind}: ${mask(report.text).slice(0, 400)}`)
+      return { ours, others }
+    }
+
+    // client-boot
+    try {
+      await page.goto(base.href, { waitUntil: 'domcontentloaded', timeout: 60_000 })
+    } catch (error) {
+      await shoot('client-boot')
+      fail('client-boot', `the page did not load: ${String(error?.message ?? error).split('\n')[0]}`)
+    }
+    const snapshot = () => page.evaluate(() => {
+      const root = document.querySelector('#root')
+      return { rootChildren: root?.childElementCount ?? 0, rootText: root instanceof HTMLElement ? root.innerText.slice(0, 2000) : '', splash: document.querySelector('[data-dsh-boot]') !== null }
+    }).catch(() => ({ rootChildren: 0, rootText: '', splash: true }))
+    let state = 'loading'
+    let last
+    const deadline = Date.now() + 90_000
+    while (Date.now() < deadline) {
+      last = await snapshot()
+      state = bootState(last)
+      if (state !== 'loading') break
+      await sleep(250)
+    }
+    if (state !== 'settled') {
+      await shoot('client-boot')
+      fail('client-boot', state === 'failed' ? `the shell reports: ${mask(last.rootText).slice(0, 800)}` : `still on the boot page after 90 s: ${mask(last?.rootText ?? '').slice(0, 300)}`)
+    }
+    await sleep(3000)
+    if (!served.some((s) => s.startsWith('2'))) fail('client-boot', `the page never loaded this plugin's module (${served.join(', ') || 'no request for it'})`)
+    const booted = await judge()
+    if (booted.ours.length > 0) {
+      await shoot('client-boot')
+      fail('client-boot', booted.ours)
+    }
+    if (booted.others.length > 0) console.log(`note: the page reported, not about this plugin:\n  ${booted.others.join('\n  ')}`)
+    stage('client-boot', 'passed', `the app settled in Chrome with this plugin active (module served: ${served.join(', ')}); nothing on the page is this plugin's error${booted.others.length > 0 ? `; ${booted.others.length} other report(s), see log` : ''}`)
+
+    // client-drop
+    const steps = []
+    // First-run notices, dialogs or full pages (FIRST_RUN_DISMISS); a dialog
+    // with none of those buttons is closed with Escape.
+    const dismissDialogs = async () => {
+      for (let round = 0; round < 6; round += 1) {
+        const dialogs = page.locator('[role=dialog]:visible, [role=alertdialog]:visible')
+        const scope = await dialogs.count() > 0 ? dialogs.first() : page.locator('body')
+        const button = scope.locator('button:visible').filter({ hasText: FIRST_RUN_DISMISS })
+        if (await button.count() === 0) {
+          if (await dialogs.count() === 0) return
+          steps.push(`dismissed "${((await dialogs.first().getAttribute('aria-label')) ?? '').slice(0, 60)}" with Escape`)
+          await page.keyboard.press('Escape')
+        } else {
+          const heading = (await scope.locator('h1:visible, h2:visible, h3:visible').first().innerText({ timeout: 2000 }).catch(() => '')).trim()
+          steps.push(`dismissed "${heading.slice(0, 60)}" with ${(await button.first().innerText()).trim()}`)
+          await button.first().click({ timeout: 10_000 })
+        }
+        await sleep(800)
+      }
+    }
+    const composerPoint = () => page.evaluate(() => {
+      const visible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 }
+      const el = [...document.querySelectorAll('[data-composer-card] [data-composer-input], [data-composer-card] textarea, [data-composer-input], textarea')].find(visible)
+      if (el === undefined) return undefined
+      const r = el.getBoundingClientRect()
+      return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }
+    })
+    try {
+      await dismissDialogs()
+      // Trains without a default workspace start with no session, and their
+      // workspace control reads "Choose workspace" (later ones name the
+      // workspace there): choose this run's home in the in-page picker, which
+      // opens a session in it.
+      const choose = page.getByRole('button', { name: /^Choose workspace$/ }).filter({ hasText: /^\s*Choose workspace\s*$/ })
+      if (await choose.count() > 0 && await choose.first().isVisible()) {
+        await choose.first().click({ timeout: 10_000 })
+        const picker = page.getByRole('dialog', { name: /Select Workspace Directory/i })
+        await picker.waitFor({ timeout: 20_000 })
+        await picker.getByRole('button', { name: /^Open$/ }).click({ timeout: 10_000 })
+        await picker.waitFor({ state: 'hidden', timeout: 20_000 })
+        steps.push('chose a workspace in the picker')
+        await sleep(1500)
+        await dismissDialogs()
+      }
+    } catch (error) {
+      await shoot('client-drop')
+      fail('client-drop', { reason: `could not give the composer a session: ${String(error?.message ?? error).split('\n')[0]}`, steps })
+    }
+    const point = await composerPoint()
+    if (point === undefined) {
+      await shoot('client-drop')
+      fail('client-drop', { reason: 'no composer input on the page', steps })
+    }
+    const fileName = 'dsh-drop-smoke.txt'
+    const fixture = join(work, 'drop-fixture', fileName)
+    mkdirSync(dirname(fixture), { recursive: true })
+    writeFileSync(fixture, `dropped by the dsh-drop boot smoke ${Date.now()}\n`)
+    const cdp = await context.newCDPSession(page)
+    const data = { items: [], files: [fixture], dragOperationsMask: 1 }
+    for (const type of ['dragEnter', 'dragOver', 'dragOver', 'drop']) await cdp.send('Input.dispatchDragEvent', { type, x: point.x, y: point.y, data })
+    // The card appears once the Host has staged the copy; watch notices meanwhile.
+    const seen = { cards: [], notices: [] }
+    const until = Date.now() + 30_000
+    while (Date.now() < until) {
+      const now = await page.evaluate(() => ({
+        cards: [...document.querySelectorAll('[data-dshdrop-key]')].map((c) => ({ text: c.textContent ?? '', state: c.getAttribute('data-state') })),
+        notices: [...document.querySelectorAll('.dsh-drop-toast, [role=status], [role=alert]')].map((n) => (n.textContent ?? '').trim()).filter(Boolean),
+      })).catch(() => ({ cards: [], notices: [] }))
+      seen.cards = now.cards
+      for (const notice of now.notices) if (!seen.notices.includes(notice)) seen.notices.push(notice)
+      const verdict = dropVerdict(seen, fileName)
+      if (verdict.ok || verdict.why.startsWith('the drop was refused')) break
+      await sleep(250)
+    }
+    const verdict = dropVerdict(seen, fileName)
+    const dropped = await judge()
+    if (!verdict.ok || dropped.ours.length > 0) {
+      await shoot('client-drop')
+      fail('client-drop', { reason: verdict.ok ? 'the drop worked, but the page reported this plugin\'s errors' : verdict.why, errors: dropped.ours, steps })
+    }
+    await shoot('client-drop')
+    stage('client-drop', 'passed', `${steps.length > 0 ? `${steps.join('; ')}; ` : ''}a file dropped on the composer became a settled card in this plugin's rail: ${seen.cards.find((c) => c.text.includes(fileName))?.text}`)
+  } finally {
+    await Promise.race([context?.close().catch(() => {}), sleep(20_000, true)])
+  }
 }
 
 let child
@@ -365,9 +658,17 @@ try {
 
   // 5. Boot the Web profile and wait for the URL line — printed only after the
   //    loader settled and the startup audit ran.
+  //    Its home is a directory of this run: 0.1.7 creates its default
+  //    workspace under the account's Documents on first page load, and the
+  //    workspace picker of the trains without one opens at home.
+  //    SSH_CONNECTION makes that picker the in-page one (a native dialog
+  //    would need a desktop session).
   const port = await freePort()
-  child = spawn(process.execPath, [dshBin, '--profile', 'web', '--no-open', '--host', '127.0.0.1', '--port', String(port)], {
-    env, stdio: ['ignore', 'pipe', 'pipe'], detached: true,
+  const userHome = join(work, 'user-home')
+  mkdirSync(join(userHome, 'Documents'), { recursive: true })
+  const bootEnv = { ...env, HOME: userHome, SSH_CONNECTION: '127.0.0.1 0 127.0.0.1 0', PATH: `${documentsShims(userHome)}${delimiter}${env.PATH}` }
+  child = spawn(process.execPath, [dshBin, '--profile', 'web', ...noOpenFlag(dshBin, env), '--host', '127.0.0.1', '--port', String(port)], {
+    env: bootEnv, stdio: ['ignore', 'pipe', 'pipe'], detached: true,
   })
   let stdout = ''
   let stderr = ''
@@ -412,9 +713,8 @@ try {
   const entries = new Map(graph.entries.map((e) => [e.id, e]))
   const entry = entries.get(pkg.name)
   if (entry === undefined) fail('client-graph', `${pkg.name} is not in __DSH_BOOT__ (${graph.entries.length} entries)`)
-  const absent = (pkg.dsh?.client?.inject ?? []).filter((name) => !entries.has(name))
-  if (absent.length > 0) fail('client-graph', `dsh.client.inject names services this train does not ship: ${absent.join(', ')}`)
-  stage('client-graph', 'passed', `${graph.entries.length} entries; this plugin and its inject targets present`)
+  const absent = absentInjects(pkg.dsh?.client?.inject, entries)
+  stage('client-graph', 'passed', `${graph.entries.length} entries; this plugin present${absent.length > 0 ? `; inject targets this train does not ship: ${absent.join(', ')}` : ' with its inject targets'}`)
 
   // 7. Host routes, as a page and as a stranger. Each is mounted (an unmounted
   //    path would not answer 405), the harness's own authentication gates
@@ -457,8 +757,8 @@ try {
 
   // 8. Browser half: the served bundle, evaluated against the shell's own
   //    module table — the specifiers a client bundle may require without a
-  //    graph row. Read from the served shell, never assumed: 0.1.1 answers 7,
-  //    0.1.7 answers 9.
+  //    graph row. Read from the served shell, never assumed: 0.0.1-rc.5 to
+  //    0.1.0-rc.7 answer 10, 0.1.0-rc.8 and 0.1.1 answer 7, 0.1.7 answers 9.
   const assets = [...html.matchAll(/<(?:script|link)\b[^>]*?\b(?:src|href)="([^"]+\.js(?:\?[^"]*)?)"/g)].map((m) => m[1])
   let table
   for (const asset of assets) {
@@ -504,6 +804,10 @@ try {
     members.checked.length > 0 ? `checked against this train: ${members.checked.join(', ')}` : 'the bundle reads no harness seed member',
     members.unchecked.length > 0 ? `unchecked: ${members.unchecked.join(', ')}` : '',
   ].filter(Boolean).join('; '))
+
+  // 10. The same page in a real browser: the app settles with this plugin
+  //     active, and a file dropped on the composer lands in this plugin's rail.
+  await withBrowserRetry(['client-boot', 'client-drop'], (attempt) => inBrowser(base, cookie, attempt))
 } catch (error) {
   if (!(error instanceof StageFailed)) stage('smoke', 'failed', mask(String(error?.message ?? error)).slice(0, 2000))
 } finally {

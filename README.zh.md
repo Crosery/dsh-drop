@@ -14,8 +14,10 @@
 
 | 场景 | 支持范围 | 验证方式 |
 | --- | --- | --- |
-| **Web**（`dsh --profile web`） | **0.1.0-rc.8 至 0.1.7-rc.2** | 该区间内每个已发布版本都通过类型检查和测试，且被 peer 范围接纳。打包后的插件在 0.1.1-rc.2 地板、0.1.7-rc.2（npm `next`）以及其余每个元组的最新构建（含 npm `latest` 0.1.5-rc.3）上完成启动冒烟：用 `dsh plugin add` 安装、激活、路由应答、浏览器半边被服务端提供。 |
+| **Web**（`dsh --profile web`） | **0.0.1-rc.5 至 0.1.7-rc.2**——每个能装上的已发布版本 | peer 范围接纳每个已发布版本。CI 用 `dsh plugin add` 把打包后的插件装进其中每一个并运行：激活、路由应答、浏览器半边被服务端提供并在无头 Chrome 中运行，往输入框拖入的文件必须出现在预览栏里；同时用该版本自己的包做类型检查和测试。更早的构建按发布时的依赖，还在 0.0.1-rc.5、0.1.0-rc.2 和 0.1.0-rc.6 上用浏览器手动实测了拖入图片、PDF、文本文件和文件夹，以及预览、移除和发送。0.0.1-rc.1 与 rc.2 同样被接纳，但这两个版本的 `@deepseek-ai/dsh` 本身装不上：它依赖的 `@deepseek-ai/dsh-agent-tool-mode` 从未在 npm 上出现过。 |
 | **桌面应用** | **0.1.7-rc.2** | 在应用自带的运行时（即其更新 feed 发布的版本）上跑同样的启动冒烟。应用窗口和原生拖放不在 CI 覆盖范围内。 |
+
+0.1.0-rc.8 之前的输入框没有附件槽：预览栏是输入框卡片正上方单独的一行，承载文件和文件夹；拖入或粘贴的图片进入卡片里输入框自己的图片条，受输入框自己的限额约束。
 
 从 0.1.7 起，DSH 会拒绝安装、并在启动时跳过 peer 范围不包含它的插件——0.2.0 之前的版本在 0.1.7 上无法加载。更新的 harness 只有经 CI 验证后才会纳入；逐版本证据见[上游兼容性](docs/harness-compatibility.zh.md)。
 
@@ -33,7 +35,7 @@ https://github.com/Crosery/dsh-drop/releases/latest/download/dsh-drop.tgz
 dsh plugin --profile web add https://github.com/Crosery/dsh-drop/releases/latest/download/dsh-drop.tgz
 ~~~
 
-tarball 已包含双半边产物，安装不用运行插件构建。固定版本时将 latest/download 替换为 download/v0.2.0。仓库同时提交了构建产物，因此 `dsh plugin --profile web add github:crosery/dsh-drop` 不需要任何构建授权即可安装；需要可复现时优先用打 tag 的 tarball。若本地 patch 已挂载 @crosery/dsh-drop，勿重复安装。
+tarball 已包含双半边产物，安装不用运行插件构建。固定版本时将 latest/download 替换为 download/v0.2.1。仓库同时提交了构建产物，因此 `dsh plugin --profile web add github:crosery/dsh-drop` 不需要任何构建授权即可安装；需要可复现时优先用打 tag 的 tarball。若本地 patch 已挂载 @crosery/dsh-drop，勿重复安装。
 
 ~~~sh
 dsh plugin --profile web remove @crosery/dsh-drop
@@ -81,7 +83,7 @@ dsh plugin --profile web remove @crosery/dsh-drop
 
 ## 配置
 
-**0.1.0–0.1.6**：$DSH_HOME/settings.yaml 中命名空间 **crosery-drop**，修改即时生效。
+**0.0.1-rc.5–0.1.6**：$DSH_HOME/settings.yaml 中命名空间 **crosery-drop**，修改即时生效。
 
 **0.1.7**：settings.yaml 已取消。请在 profile 的 `cordis.patch.yml` 里给插件条目（id `drop`）写配置（需重写整个 `config` 块——patch 会替换该行的配置）。0.1.7 的一次性导入**不会**迁移 `crosery-drop` 段：它按段名寻找同名条目，而本条目叫 `drop`；旧值留在 `settings.yaml.imported` 里。0.1.7 的设置页不会为这些字段生成表单。
 
@@ -104,14 +106,15 @@ dsh plugin --profile web remove @crosery/dsh-drop
 - 单个文件的复制没有字节级进度（文件夹显示已完成/总文件数），跨多次拖入也没有总磁盘配额。卡片仍在准备或上传时发送会被拦下并提示；未能暂存的文件会按数量提示。
 - **复制文件夹会复制忽略列表以外的一切，包括 `.env` 这类机密文件**，与单独拖入该文件相同。文件夹内的符号链接按浏览器的读取方式处理；Host 原位统计文件夹时从不跟随链接。
 - 粘贴文件夹只是尽力而为：浏览器很少把文件夹放进剪贴板。
-- 在 0.1.2 起的输入框上，引用在你发送的那一刻追加到消息末尾，再由输入框自己的 Enter 或发送按钮投递——Cmd/Ctrl+Enter 的 steer/排队、上传检查和斜杠命令都照常生效。若输入框拒绝发送（例如它自己的上传还没完成），追加的引用会被撤回，文件继续留在栏中。Shift+Enter、输入法组字、高亮中的补全菜单都不会被当作发送；停止按钮永远不会带走文件。Alt+Enter、AltGr+Enter 和 Ctrl+Cmd+Enter 在 0.1.7-rc.1 及之前的输入框上会发送，同样带上引用；0.1.7-rc.2 忽略这些按键，引用会被撤回，且有暂存文件时不会插入换行。0.1.0–0.1.1 的 textarea 输入框仍由插件改写草稿并自行提交；补全菜单有高亮项时，Enter 仍是选中它。
+- 在 0.1.2 起的输入框上，引用在你发送的那一刻追加到消息末尾，再由输入框自己的 Enter 或发送按钮投递——Cmd/Ctrl+Enter 的 steer/排队、上传检查和斜杠命令都照常生效。若输入框拒绝发送（例如它自己的上传还没完成），追加的引用会被撤回，文件继续留在栏中。Shift+Enter、输入法组字、高亮中的补全菜单都不会被当作发送；停止按钮永远不会带走文件。Alt+Enter、AltGr+Enter 和 Ctrl+Cmd+Enter 在 0.1.7-rc.1 及之前的输入框上会发送，同样带上引用；0.1.7-rc.2 忽略这些按键，引用会被撤回，且有暂存文件时不会插入换行。textarea 输入框（0.1.1 及更早）仍由插件改写草稿并自行提交；补全菜单有高亮项时，Enter 仍是选中它。
 - 已发出的消息若之后失败，输入框会把带引用的文字恢复到草稿供重试，引用不会回到附件栏。本插件无法新增通用文件内容块。
 - 附件留在栏中时预览字节保存在内存里，发送或移除后即释放。预览显示的是拖入时的字节，模型读取的是实际文件。媒体、HEIC、PDF 支持因浏览器而异。
+- 0.1.0-rc.8 之前，预览栏和输入框的图片条是两行：图片留在输入框自己的图片条里，由输入框绘制和移除；卡片上方的预览栏承载其余一切。
 - 接管 single 附件席位而非加一条并列栏；其他插件若占用相同优先级可能冲突。卸载后恢复出厂栏。
 
 ## 安全
 
-没有第三方上传服务、分析统计、自动执行或解压。暂存是 Host 写端点：文件名归约成单段（Windows Host 上遵循 Windows 命名规则）、限制大小、拒绝简单跨站 POST、不授予 CORS。复制文件夹时，Host 会重新清洗文件夹名和每个相对路径（不允许 `.` 或 `..` 段、去掉控制字符、在 Windows Host 上替换 Windows 保留字符和保留名、限制字节长度），只写入该批次自己的私有目录，且从不覆盖已有路径。从 **0.1.2** 起三条路由还要求 harness 自身的登录鉴权（其 connection 检查），没有登录 cookie 的其他本机进程会被拒绝——CI 在每个做启动冒烟的序列上都会检查这一点。**0.1.0–0.1.1 上这些路由没有自己的鉴权**：保持 DSH 仅本机可访问或置于认证之后，不向不受信任用户暴露宿主权限。同源插件拥有页面权限。
+没有第三方上传服务、分析统计、自动执行或解压。暂存是 Host 写端点：文件名归约成单段（Windows Host 上遵循 Windows 命名规则）、限制大小、拒绝简单跨站 POST、不授予 CORS。复制文件夹时，Host 会重新清洗文件夹名和每个相对路径（不允许 `.` 或 `..` 段、去掉控制字符、在 Windows Host 上替换 Windows 保留字符和保留名、限制字节长度），只写入该批次自己的私有目录，且从不覆盖已有路径。从 **0.1.2** 起三条路由还要求 harness 自身的登录鉴权（其 connection 检查），没有登录 cookie 的其他本机进程会被拒绝——CI 在每个做启动冒烟的序列上都会检查这一点。**0.1.2 之前（0.0.1-rc.5 至 0.1.1）这些路由没有自己的鉴权**：保持 DSH 仅本机可访问或置于认证之后，不向不受信任用户暴露宿主权限。同源插件拥有页面权限。
 
 SVG 留在图片元素，HTML 只展示转义源码，PDF blob 强制 application/pdf；预览不提供顶层 blob 导航。默认保留期清理不等于安全擦除。参见[开发与安全边界](docs/development.zh.md)。
 
@@ -126,7 +129,7 @@ npm run build
 npm run check
 ~~~
 
-仓库自足，依赖公开 pin 版本，不要求兄弟 checkout。[AGENTS.md](AGENTS.md) 路由到[双语开发、PR、发版与兼容规范](docs/README.zh.md)。CI 在 Node 22.19 和 24 上按此顺序跑以上门禁——`check:dist` 在 `npm run build` 重写 `lib/` 之前用临时构建比对已提交的产物，构建后树必须保持不变——另跑两个 harness 组合——固定的 0.1.7-rc.2 开发序列和 0.1.1-rc.2 地板——每格都做类型检查、测试、peer 准入和打包插件的启动冒烟；第三格跟随桌面应用的版本。Harness compatibility 工作流每天对桌面应用 feed 与 npm `latest` / `next` / `alpha` 运行，每周扫描全部已发布的 harness 版本，并在 macOS 上对桌面应用本体运行。发版必须先通过这道门禁。
+仓库自足，依赖公开 pin 版本，不要求兄弟 checkout。[AGENTS.md](AGENTS.md) 路由到[双语开发、PR、发版与兼容规范](docs/README.zh.md)。CI 在 Node 22.19 和 24 上按此顺序跑以上门禁——`check:dist` 在 `npm run build` 重写 `lib/` 之前用临时构建比对已提交的产物，构建后树必须保持不变——另跑两个 harness 组合——固定的 0.1.7-rc.2 开发序列和 0.1.1-rc.2 地板——每格都做类型检查、测试、peer 准入和打包插件的启动冒烟；第三格跟随桌面应用的版本。Harness compatibility 工作流每天对桌面应用 feed 与 npm `latest` / `next` / `alpha` 运行，每周扫描全部已发布的 harness 版本——除类型检查、测试和准入外，每个版本都装入打包后的插件并启动——并在 macOS 上对桌面应用本体运行。发版必须先让它要发布的那个 tarball 通过同一道门禁。
 
 ## 许可
 

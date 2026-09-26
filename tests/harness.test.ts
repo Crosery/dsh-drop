@@ -14,13 +14,15 @@ import { createRequire } from 'node:module'
 import test from 'node:test'
 import {
   FLOOR, REQUIRED, TRAIN_EXTRAS,
-  describeRefusals, harnessPeers, npmErrorCode, parseFeed, planCells, planRepoint, refusals, sweepStart, tupleHeads, upstreamGap,
+  describeRefusals, gapEvidence, harnessPeers, missingVerdict, npmErrorCode, parseFeed, planCells, planRepoint, refusals, sweepStart, tupleHeads, upstreamGap,
 } from '../scripts/harness-lib.mjs'
 import {
-  NAME_HEADER, ROUTES,
-  classifyDiagnostics, exportedNames, inert, maskTokens, membersRead, missingMembers, moduleTableOf, onTrain, strictModule,
+  BOOT_TEXT, FIRST_RUN_DISMISS, NAME_HEADER, NO_SESSION_COPY, ROUTES,
+  absentInjects, blamesPlugin, bootState, classifyDiagnostics, dropVerdict, moduleLines, modulesServedBy, exportedNames, inert, laterHarnessVersions, maskTokens, membersRead, missingMembers, moduleTableOf, noOpenArgs, onTrain,
+  refusedAsUnpublished, releaseCutoff, strayPackages, strictModule,
 } from '../scripts/smoke-lib.mjs'
 import { BATCH_ROUTE, NAME_HEADER as CONTRACT_NAME_HEADER, RESOLVE_ROUTE, STAGE_ROUTE } from '../src/contract.ts'
+import { messages, type Messages } from '../src/client/messages.ts'
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
   peerDependencies: Record<string, string>
@@ -51,12 +53,13 @@ const PUBLISHED = [
 ]
 
 test('the sweep starts at the lowest version every harness peer admits', () => {
-  assert.equal(sweepStart(peers), '0.1.0-rc.8')
+  assert.equal(sweepStart(peers), '0.0.1-rc.0')
   assert.deepEqual(sweepStart([['a', '>=0.1.1-rc.0 <0.1.2-0'], ['b', '>=0.1.0-rc.8 <0.1.2-0']]), '0.1.1-rc.0')
 })
 
 test('admission applies both semver rules and names the one that refused', () => {
-  for (const version of ['0.1.1-rc.2', '0.1.5-rc.3', '0.1.7-rc.2', '0.1.7-alpha.2']) assert.deepEqual(refusals(version, peers), [], version)
+  // Every published harness version is admitted: CI installs the plugin into each one and runs it.
+  for (const version of PUBLISHED) assert.deepEqual(refusals(version, peers), [], version)
   // A wildcard admits a prerelease only when prereleases are included.
   const wide = refusals('0.1.7-rc.2', [['@deepseek-ai/dsh-x', '0.1.x']])
   assert.deepEqual(wide, [{ name: '@deepseek-ai/dsh-x', runtime: true, installer: false }])
@@ -65,8 +68,8 @@ test('admission applies both semver rules and names the one that refused', () =>
   // The released v0.1.3 ranges stopped at 0.1.6: the 0.1.7 runtime refuses it.
   const old = refusals('0.1.7-rc.2', [['@deepseek-ai/dsh-settings', '>=0.1.1-rc.0 <0.1.2-0 || >=0.1.5-alpha.0 <0.1.6-0']])
   assert.deepEqual(old, [{ name: '@deepseek-ai/dsh-settings', runtime: false, installer: false }])
-  // The next tuple is admitted only after a sweep verified it.
-  assert.equal(refusals('0.1.8-alpha.0', peers).length, peers.length)
+  // The next tuple is admitted only after a sweep verified it; so is 0.1.4, never published.
+  for (const version of ['0.1.8-alpha.0', '0.1.4-alpha.0', '0.0.2-alpha.0']) assert.equal(refusals(version, peers).length, peers.length, version)
 })
 
 test('each tuple head is its newest prerelease', () => {
@@ -75,12 +78,24 @@ test('each tuple head is its newest prerelease', () => {
   ])
 })
 
+test('the sweep boots the plugin on every published version by default, from 0.0.1-rc.1', () => {
+  const resolved = { desktop: '0.1.7-rc.2', latest: '0.1.5-rc.3', next: '0.1.7-rc.2', alpha: '0.1.7-alpha.2' }
+  const rows = planCells(['pinned', 'floor', 'desktop', 'sweep'], { published: PUBLISHED, sweepFrom: sweepStart(peers)!, pinned: '0.1.7-rc.2', resolved })
+  // Every published version is a row, once: the three named cells cover 0.1.7-rc.2 and the floor.
+  assert.deepEqual(rows.map((r) => r.cell), ['pinned', 'floor', 'desktop', ...PUBLISHED.filter((v) => v !== '0.1.7-rc.2' && v !== FLOOR)])
+  assert.ok(rows.every((r) => r.smoke), 'smoke: all is the default, for the weekly sweep and the release gate')
+  // The PR gate plans no sweep, so the smoke policy cannot widen it.
+  assert.deepEqual(planCells(['pinned', 'floor'], { published: PUBLISHED, sweepFrom: '0.0.1-rc.0' }, 'all'), [
+    { cell: 'pinned', smoke: true }, { cell: 'floor', smoke: true },
+  ])
+})
+
 test('named cells always smoke; the sweep expands to every published version from the start, once', () => {
   const resolved = { desktop: '0.1.7-rc.2', latest: '0.1.5-rc.3', next: '0.1.7-rc.2', alpha: '0.1.7-alpha.2' }
   assert.deepEqual(planCells(['pinned', 'floor'], { published: [], sweepFrom: '0.1.0-rc.8' }), [
     { cell: 'pinned', smoke: true }, { cell: 'floor', smoke: true },
   ])
-  const rows = planCells(['pinned', 'floor', 'desktop', 'sweep'], { published: PUBLISHED, sweepFrom: '0.1.0-rc.8', pinned: '0.1.7-rc.2', resolved })
+  const rows = planCells(['pinned', 'floor', 'desktop', 'sweep'], { published: PUBLISHED, sweepFrom: '0.1.0-rc.8', pinned: '0.1.7-rc.2', resolved }, 'heads')
   const exact = (cell: string) => /^\d/.test(cell)
   const swept = rows.filter((r) => exact(r.cell)).map((r) => r.cell)
   // Versions below the start are not swept; ones a named cell covers are not repeated.
@@ -91,7 +106,7 @@ test('named cells always smoke; the sweep expands to every published version fro
   // Heads of each tuple, plus what latest and alpha resolve to.
   assert.deepEqual(smoked, ['0.1.0-rc.8', '0.1.2-rc.1', '0.1.3-alpha.2', '0.1.5-rc.3', '0.1.6-alpha.2', '0.1.7-alpha.2'])
   // A tuple published tomorrow is swept today without editing anything.
-  const tomorrow = planCells(['sweep'], { published: [...PUBLISHED, '0.1.8-alpha.1'], sweepFrom: '0.1.0-rc.8' })
+  const tomorrow = planCells(['sweep'], { published: [...PUBLISHED, '0.1.8-alpha.1'], sweepFrom: '0.1.0-rc.8' }, 'heads')
   assert.deepEqual(tomorrow.at(-1), { cell: '0.1.8-alpha.1', smoke: true })
   assert.ok(planCells(['sweep'], { published: PUBLISHED, sweepFrom: '0.1.0-rc.8' }, 'none').every((r) => !r.smoke))
   assert.ok(planCells(['sweep'], { published: PUBLISHED, sweepFrom: '0.1.0-rc.8' }, 'all').every((r) => r.smoke))
@@ -130,7 +145,9 @@ test('repointing keeps the pin of a package the train never published, unless th
   // The input manifest is untouched.
   assert.equal(fixture.devDependencies['@deepseek-ai/dsh-settings'], '0.1.7-rc.2')
 
-  assert.deepEqual(planRepoint(fixture, '0.1.0-rc.7', published([REQUIRED[0]!, ...TRAIN_EXTRAS])).missing, [REQUIRED[0]])
+  // The renderer is not required: a train without it keeps the pin. A peer is.
+  const noRenderer = planRepoint(fixture, '0.1.0-rc.7', published(['@deepseek-ai/dsh-client-ui-renderer', ...TRAIN_EXTRAS]))
+  assert.deepEqual([noRenderer.missing, noRenderer.kept], [[], ['@deepseek-ai/dsh-client-ui-renderer']])
   const noPeer = planRepoint(fixture, '0.1.9-rc.1', published(['@deepseek-ai/dsh-settings', ...TRAIN_EXTRAS]))
   assert.deepEqual([noPeer.missing, noPeer.added], [['@deepseek-ai/dsh-settings'], []])
   // An exact cordis is taken as is; one that cannot be resolved keeps the pin.
@@ -138,6 +155,62 @@ test('repointing keeps the pin of a package the train never published, unless th
   assert.equal(exactShipped.manifest.devDependencies['@deepseek-ai/cordis'], '4.0.2')
   const unresolved = planRepoint(fixture, FLOOR, { publishedAt: () => true, shipped: { '@deepseek-ai/cordis': '^9.0.0' }, exact: () => undefined }) as Plan
   assert.equal(unresolved.manifest.devDependencies['@deepseek-ai/cordis'], '4.0.4')
+})
+
+test('the trains before 0.1.0-rc.8 keep the renderer pin for types, and gain dsh-client-runtime', () => {
+  // The real manifest's shape, as the repoint sees it on 0.1.0-rc.2 and 0.0.1-rc.5,
+  // with the packages npm answers for there.
+  const early = {
+    peerDependencies: { '@deepseek-ai/cordis': '^4.0.0', '@deepseek-ai/dsh-home-paths': '*', '@deepseek-ai/dsh-host-webserver': '*', '@deepseek-ai/dsh-settings': '*' },
+    devDependencies: Object.fromEntries([
+      'api-remotes', 'client-locale', 'client-store', 'client-ui-conversation', 'client-ui-input-trigger', 'client-ui-primitives',
+      'client-ui-renderer', 'client-ui-slots', 'home-paths', 'host-webserver', 'settings',
+    ].map((name) => [`@deepseek-ai/dsh-${name}`, '0.1.7-rc.2'])),
+  }
+  // Absent before 0.1.2 (store) and before 0.1.0-rc.8 (renderer); everything else, runtime included, is published.
+  const facts = { publishedAt: (name: string) => !['@deepseek-ai/dsh-client-store', '@deepseek-ai/dsh-client-ui-renderer'].includes(name) }
+  for (const version of ['0.0.1-rc.5', '0.1.0-rc.2', '0.1.0-rc.7']) {
+    const plan = planRepoint(early, version, facts) as { manifest: typeof early, missing: string[], kept: string[], added: string[] }
+    assert.deepEqual(plan.missing, [], version)
+    assert.deepEqual(plan.kept, ['@deepseek-ai/dsh-client-store', '@deepseek-ai/dsh-client-ui-renderer'], version)
+    assert.deepEqual(plan.added, ['@deepseek-ai/dsh-client-runtime'], version)
+    assert.equal(plan.manifest.devDependencies['@deepseek-ai/dsh-client-ui-conversation'], version)
+    assert.equal(plan.manifest.devDependencies['@deepseek-ai/dsh-client-ui-renderer'], '0.1.7-rc.2')
+  }
+  // 0.0.1-rc.1 and rc.2 never published dsh-home-paths (first 0.0.1-rc.3), a peer the Host imports: missing.
+  const first = planRepoint(early, '0.0.1-rc.1', { publishedAt: (name: string) => !['@deepseek-ai/dsh-client-store', '@deepseek-ai/dsh-client-ui-renderer', '@deepseek-ai/dsh-client-ui-input-trigger', '@deepseek-ai/dsh-home-paths'].includes(name) })
+  assert.deepEqual([first.missing, first.kept], [['@deepseek-ai/dsh-home-paths'], ['@deepseek-ai/dsh-client-store', '@deepseek-ai/dsh-client-ui-input-trigger', '@deepseek-ai/dsh-client-ui-renderer']])
+  assert.deepEqual(REQUIRED, ['@deepseek-ai/dsh-client-ui-conversation', '@deepseek-ai/dsh-client-ui-slots'])
+})
+
+test("a train missing what the plugin needs is incomplete only when npm refuses the harness itself, and says why", () => {
+  const missing = [{ name: '@deepseek-ai/dsh-home-paths', why: 'predates' }]
+  // What npm answers for a bare `npm install @deepseek-ai/dsh@0.0.1-rc.1` today.
+  const e404 = [
+    'npm error code E404',
+    'npm error 404 Not Found - GET https://registry.npmjs.org/@deepseek-ai%2fdsh-agent-tool-mode - Not found',
+    'npm error 404',
+    "npm error 404  The requested resource '@deepseek-ai/dsh-agent-tool-mode@^0.0.1-rc.1' could not be found or you do not have permission to access it.",
+  ].join('\n')
+  assert.equal(gapEvidence(e404), 'E404: npm has no @deepseek-ai/dsh-agent-tool-mode@^0.0.1-rc.1')
+  assert.equal(gapEvidence(e404.split('\n').slice(0, 2).join('\n')), 'E404: npm has no @deepseek-ai/dsh-agent-tool-mode')
+  assert.equal(gapEvidence('npm error code ETARGET\nnpm error notarget No matching version found for @deepseek-ai/dsh-x@0.1.9-rc.1.'), 'ETARGET: @deepseek-ai/dsh-x@0.1.9-rc.1 is not on npm')
+  assert.equal(gapEvidence('npm error code ECONNRESET'), undefined)
+
+  const upstream = missingVerdict('0.0.1-rc.1', missing, { ok: false, output: e404 })
+  assert.equal(upstream.incomplete, true)
+  // The first line is what CI's notice and the sweep's note show: it carries npm's evidence.
+  assert.match(upstream.message.split('\n')[0]!, /^@deepseek-ai\/dsh@0\.0\.1-rc\.1 does not install on its own \(E404: npm has no @deepseek-ai\/dsh-agent-tool-mode@\^0\.0\.1-rc\.1\): published incomplete upstream; also not published at 0\.0\.1-rc\.1, and this plugin needs it: @deepseek-ai\/dsh-home-paths \(predates\)$/)
+  // A harness that installs while lacking what the plugin needs is drift: the ranges admit it.
+  const runnable = missingVerdict('0.1.9-rc.1', missing, { ok: true, output: 'added 900 packages' })
+  assert.equal(runnable.incomplete, false)
+  assert.match(runnable.message, /installs, yet this train lacks what the plugin needs/)
+  // A registry that did not answer proves nothing: a failure, not a neutral cell.
+  for (const bare of [{ ok: false, output: 'npm error code ECONNRESET' }, { ok: false, timedOut: true, output: 'npm error code E404' }]) {
+    const unknown = missingVerdict('0.0.1-rc.1', missing, bare)
+    assert.equal(unknown.incomplete, false)
+    assert.match(unknown.message, /did not answer \((ECONNRESET|timed out)\), which proves nothing/)
+  }
 })
 
 test("only npm's answers about the packages count as an upstream gap", () => {
@@ -214,7 +287,64 @@ test('the smoke holds only this plugin to account for boot diagnostics, and mask
 test("the shell's module table is read from its bundle", () => {
   const shell = 'var x=1;function WS(){return{react:a,"react/jsx-runtime":b,"react-dom":c,"@deepseek-ai/cordis":d,"@deepseek-ai/dsh-client-ui-dockkit":e}}'
   assert.deepEqual(moduleTableOf(shell), ['react', 'react/jsx-runtime', 'react-dom', '@deepseek-ai/cordis', '@deepseek-ai/dsh-client-ui-dockkit'])
-  assert.equal(moduleTableOf('function f(){return{a:1}}'), undefined)
+  assert.equal(moduleTableOf('function f(){return{a:1}}'), undefined)  // The literal in dsh-web-frontend 0.0.1-rc.5 to 0.1.0-rc.7 (index-DYtepzMn.js at 0.0.1-rc.5): ten specifiers.
+  const early = 'const F={react:B6,"react/jsx-runtime":Y5,"react-dom":T8,"react-dom/client":E6,"@deepseek-ai/cordis":h6,"@deepseek-ai/dsh-client-ui-slots":D6,'
+    + '"@deepseek-ai/dsh-client-web-react":g8,"@deepseek-ai/dsh-client-ui-primitives":im,"@deepseek-ai/dsh-client-ui-attachment":Im,"@deepseek-ai/dsh-client-schema-form":Zm};'
+  assert.deepEqual(moduleTableOf(early), [
+    'react', 'react/jsx-runtime', 'react-dom', 'react-dom/client', '@deepseek-ai/cordis', '@deepseek-ai/dsh-client-ui-slots',
+    '@deepseek-ai/dsh-client-web-react', '@deepseek-ai/dsh-client-ui-primitives', '@deepseek-ai/dsh-client-ui-attachment', '@deepseek-ai/dsh-client-schema-form',
+  ])
+})
+
+test('the smoke installs a train as released: cut off at its own release, with no package of a later train', () => {
+  // `npm view @deepseek-ai/dsh time --json`, abridged.
+  const times: Record<string, string> = {
+    created: '2026-08-10T19:41:11.384Z', modified: '2026-09-24T14:18:11.794Z',
+    '0.1.5-rc.2': '2026-09-10T14:57:10.790Z', '0.1.6-alpha.1': '2026-09-15T03:23:13.750Z', '0.1.6-alpha.2': '2026-09-17T13:52:10.201Z',
+    // Publication order is not semver order: 0.1.5-rc.3 went out after 0.1.6-alpha.2.
+    '0.1.5-rc.3': '2026-09-22T05:55:20.869Z', '0.1.7-rc.2': '2026-09-24T14:18:11.337Z',
+  }
+  // One second after its own @deepseek-ai/dsh — not the next harness, whose packages
+  // (dsh-app-boot 0.1.6-alpha.2 at 13:39:43) went out before it and satisfy ^0.1.6-alpha.1.
+  assert.equal(releaseCutoff(times, '0.1.6-alpha.1'), '2026-09-15T03:23:14.750Z')
+  assert.equal(releaseCutoff(times, '0.1.7-rc.2'), undefined, 'the newest version installs as a user gets it today')
+  assert.throws(() => releaseCutoff(times, '0.1.9-rc.1'), /not on npm/)
+  const later = laterHarnessVersions(times, '0.1.6-alpha.1')
+  assert.deepEqual([...later].sort(), ['0.1.5-rc.3', '0.1.6-alpha.2', '0.1.7-rc.2'])
+  assert.deepEqual(laterHarnessVersions(times, '0.1.7-rc.2').size, 0)
+
+  const installed: [string, string][] = [
+    ['@deepseek-ai/dsh', '0.1.6-alpha.1'], ['@deepseek-ai/dsh-app-boot', '0.1.6-alpha.2'], ['@deepseek-ai/dsh-web-frontend', '0.1.6-alpha.1'],
+    ['@deepseek-ai/cordis', '4.0.4'], ['@deepseek-ai/cordis-plugin-hmr', '1.0.19'], ['react', '0.1.6-alpha.2'],
+  ]
+  assert.deepEqual(strayPackages(installed, later), [['@deepseek-ai/dsh-app-boot', '0.1.6-alpha.2']])
+  assert.deepEqual(strayPackages(installed.filter(([name]) => name !== '@deepseek-ai/dsh-app-boot'), later), [])
+
+  // A package of the train published after the cutoff moves it later; npm words that two ways.
+  assert.deepEqual(refusedAsUnpublished('npm error code ETARGET\nnpm error notarget No matching version found for @deepseek-ai/dsh-workflow-worker-thread@^0.1.1-rc.2 with a date before 2026/8/21 20:42:19.'),
+    { name: '@deepseek-ai/dsh-workflow-worker-thread', version: '0.1.1-rc.2' })
+  assert.deepEqual(refusedAsUnpublished('npm error code ENOVERSIONS\nnpm error No versions available for @deepseek-ai/dsh-shell\nnpm error A complete log'), { name: '@deepseek-ai/dsh-shell' })
+  assert.equal(refusedAsUnpublished('npm error code ERESOLVE\nnpm error ERESOLVE unable to resolve dependency tree'), undefined)
+})
+
+test('the smoke passes --no-open only where dsh web lists it, and reports an inject target a train lacks', () => {
+  // `dsh --profile web --help` on 0.0.1-rc.5 (also 0.1.0-rc.2 to rc.7): no --no-open, which it refuses as unknown.
+  const early = [
+    'Usage: dsh --profile web [options]', '', 'Serve the DeepSeek Harness browser UI.', '', 'Options:',
+    '  --host <host>                  bind host; pass 0.0.0.0 to reach it from', '  --port <port>                  listen port; pass 0 to let the OS pick a free',
+    '  -h, --help                     show this help',
+  ].join('\n')
+  assert.deepEqual(noOpenArgs(early), [])
+  // 0.1.7-rc.2's help.
+  assert.deepEqual(noOpenArgs(`${early}\n  --no-open                      do not open the Web UI in the default browser`), ['--no-open'])
+  assert.deepEqual(noOpenArgs('  --no-opener  something else'), [])
+
+  const inject = ['@deepseek-ai/dsh-client-ui-conversation', '@deepseek-ai/dsh-client-ui-input-trigger', '@deepseek-ai/dsh-client-locale', '@deepseek-ai/dsh-client-ui-renderer']
+  // 0.1.0-rc.2's boot graph: every target but the renderer, first shipped in 0.1.0-rc.8.
+  const early010 = new Set(inject.slice(0, 3))
+  assert.deepEqual(absentInjects(inject, early010), ['@deepseek-ai/dsh-client-ui-renderer'])
+  assert.deepEqual(absentInjects(inject, new Set(inject)), [])
+  assert.deepEqual(absentInjects(undefined, new Set()), [])
 })
 
 test("a bundle's reads of a renamed seed export are caught, statically and when the factory runs", () => {
@@ -252,6 +382,88 @@ test("a seed installed at another version cannot vouch for a train's exports", (
   // Cordis follows the train under its own version numbers.
   assert.equal(onTrain(at('4.0.4'), '@deepseek-ai/cordis', '0.1.1-rc.2').names, names)
   assert.deepEqual(onTrain({ why: 'not installed with this harness' }, '@deepseek-ai/dsh-client-ui-dockkit', '0.1.1-rc.2'), { why: 'not installed with this harness' })
+})
+
+test("the browser stage reads the shell's boot page on every train", () => {
+  const page = (rootText: string, extra: Partial<{ rootChildren: number, splash: boolean }> = {}) => ({ rootChildren: 1, splash: false, rootText, ...extra })
+  // Up to 0.1.0-rc.7: a React boot page in #root.
+  assert.equal(bootState(page(`${BOOT_TEXT.loading}…`)), 'loading')
+  // From 0.1.0-rc.8: a DOM splash the renderer clears; without a renderer it stays, with no error.
+  assert.equal(bootState(page('', { splash: true })), 'loading')
+  assert.equal(bootState(page('', { rootChildren: 0 })), 'loading')
+  assert.equal(bootState(page(`${BOOT_TEXT.failed}\nweb boot: 1 entries did not activate\n@crosery/dsh-drop: import failed`)), 'failed')
+  assert.equal(bootState(page('New Session\nWorkspaces\nNo sessions yet\nSettings\nInto the Unknown')), 'settled')
+})
+
+test('the browser stage knows which script carried this module, combos included', () => {
+  const id = '@crosery/dsh-drop'
+  // Up to 0.1.6: one module per script. From 0.1.7: combos, even of one.
+  assert.deepEqual(modulesServedBy('http://127.0.0.1:1/plugins/@crosery/dsh-drop/client.js?rev=1'), [id])
+  assert.deepEqual(modulesServedBy('http://127.0.0.1:1/plugins/%40crosery%2Fdsh-drop/client.js?rev=1'), [id])
+  const combo = 'http://127.0.0.1:1/plugins/??@deepseek-ai/dsh-typert-registry/client.js,@crosery/dsh-drop/client.js&rev=abc'
+  assert.deepEqual(modulesServedBy(combo), ['@deepseek-ai/dsh-typert-registry', id])
+  assert.deepEqual(modulesServedBy('http://127.0.0.1:1/plugins/??@crosery/dsh-drop/client.js&rev=abc'), [id])
+  assert.deepEqual(modulesServedBy('http://127.0.0.1:1/assets/index-C-1AiF3k.js'), [])
+  assert.deepEqual(modulesServedBy('not a url'), [])
+
+  const text = [
+    'window.__ModuleLoader__.load({ id: "@deepseek-ai/dsh-typert-registry", factory: (require) => {', 'a()', '} });',
+    'window.__ModuleLoader__.load({ id: "@crosery/dsh-drop", factory: (require) => {', 'b()', 'c()', '} });',
+  ].join('\n')
+  assert.deepEqual(moduleLines(text, id), [4, 7])
+  assert.deepEqual(moduleLines(text, '@deepseek-ai/dsh-typert-registry'), [1, 3])
+  assert.equal(moduleLines(text, '@crosery/dsh-other'), undefined)
+
+  const linesOf = (url: string) => (url === combo ? [4, 7] as [number, number] : undefined)
+  // A frame in this module's lines of a combo is this plugin's; a frame in another module's is not.
+  assert.equal(blamesPlugin({ text: `TypeError: x is undefined\n    at b (${combo}:5:3)` }, id, linesOf), true)
+  assert.equal(blamesPlugin({ text: `TypeError: x is undefined\n    at a (${combo}:2:3)` }, id, linesOf), false)
+  assert.equal(blamesPlugin({ text: 'boom', location: { url: combo, line: 6 } }, id, linesOf), true)
+  // A script serving this module alone, a failed request carrying it, or the text naming the package.
+  assert.equal(blamesPlugin({ text: 'at f (http://127.0.0.1:1/plugins/@crosery/dsh-drop/client.js?rev=1:9:1)' }, id, linesOf), true)
+  assert.equal(blamesPlugin({ text: `${combo} net::ERR_ABORTED`, request: combo }, id, linesOf), true)
+  assert.equal(blamesPlugin({ text: '@crosery/dsh-drop: toast failed' }, id, linesOf), true)
+  assert.equal(blamesPlugin({ text: 'load failed: %40crosery%2Fdsh-drop' }, id, linesOf), true)
+  assert.equal(blamesPlugin({ text: 'Failed to load resource: the server responded with a status of 404', location: { url: 'http://127.0.0.1:1/favicon.ico' } }, id, linesOf), false)
+})
+
+/** The plugin's notice copy for one document language (`messages()` reads `<html lang>`). */
+function copyFor(lang: string): Messages {
+  const saved = Object.getOwnPropertyDescriptor(globalThis, 'document')
+  Object.defineProperty(globalThis, 'document', { value: { documentElement: { lang } }, configurable: true })
+  try {
+    return messages()
+  } finally {
+    if (saved === undefined) Reflect.deleteProperty(globalThis, 'document')
+    else Object.defineProperty(globalThis, 'document', saved)
+  }
+}
+
+test("the browser drop passes only on a settled card in this plugin's rail, and fails on the no-session refusal", () => {
+  const enMessages = copyFor('en-US')
+  const zhMessages = copyFor('zh-CN')
+  assert.notEqual(enMessages.noSession, zhMessages.noSession)
+  // The copy the smoke looks for is the copy the plugin shows.
+  for (const copy of [enMessages, zhMessages]) {
+    assert.ok(NO_SESSION_COPY.includes(copy.noSession), copy.noSession)
+    assert.ok(NO_SESSION_COPY.includes(copy.overlayNoSession), copy.overlayNoSession)
+  }
+  const file = 'dsh-drop-smoke.txt'
+  const card = (state: string | null) => ({ text: `TXT${file}Text · 49 B · Copied`, state })
+  assert.deepEqual(dropVerdict({ cards: [card(null)], notices: [] }, file), { ok: true })
+  // v0.2.0 on 0.1.0-rc.6 as released: the drop is swallowed with this toast and no card.
+  const refused = dropVerdict({ cards: [], notices: [zhMessages.noSession] }, file)
+  assert.equal(refused.ok, false)
+  assert.match(refused.why!, /^the drop was refused with "请先打开一个会话再拖入文件" and no card appeared$/)
+  assert.match(dropVerdict({ cards: [], notices: [] }, file).why!, /^no rail card for dsh-drop-smoke\.txt$/)
+  assert.match(dropVerdict({ cards: [card('busy')], notices: [] }, file).why!, /never finished staging/)
+  assert.match(dropVerdict({ cards: [card('error')], notices: [] }, file).why!, /shows a failed stage/)
+  assert.match(dropVerdict({ cards: [card(null)], notices: [enMessages.noSession] }, file).why!, /^the drop was refused/)
+})
+
+test('first-run notices are put away without configuring anything', () => {
+  for (const label of ['Continue', '继续', 'Configure later', ' Configure later ', 'OK']) assert.ok(FIRST_RUN_DISMISS.test(label), label)
+  for (const label of ['Go to settings', 'Save and continue', 'Open', 'Send message', 'Continue later?']) assert.ok(!FIRST_RUN_DISMISS.test(label), label)
 })
 
 test('the smoke checks the routes the Host registers', () => {

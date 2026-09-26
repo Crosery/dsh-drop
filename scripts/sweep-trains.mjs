@@ -7,7 +7,9 @@
  * `node scripts/harness-target.mjs <version> --repoint --install` (see
  * `scripts/harness-lib.mjs` for the rules: every `@deepseek-ai/dsh-*`
  * devDependency the train published moves to it, one it never published keeps
- * this repository's pin unless the plugin needs it, `dsh-client-runtime` rides
+ * this repository's pin unless the plugin needs it — then the train is
+ * incomplete upstream only if `@deepseek-ai/dsh` itself does not install
+ * there, and npm's answer is the row's note — `dsh-client-runtime` rides
  * along where the train has it, cordis follows the train, every other
  * devDependency stays at its package-lock.json version, and a peer graph
  * that hits ERESOLVE is reinstalled in legacy peer mode with the train's own
@@ -26,7 +28,9 @@
  *
  * With no versions, every published `@deepseek-ai/dsh` version is swept. The
  * scratch copies live under `--work` (a temporary directory by default) and are
- * left in place for inspection; nothing in the repository is modified.
+ * left in place for inspection; nothing in the repository is modified. Exit 1
+ * when any row fails a stage or is refused by a peer range — the ranges admit
+ * every published version, so a refusal is drift even on an incomplete train.
  */
 
 import { execFile } from 'node:child_process'
@@ -101,12 +105,12 @@ async function sweep(version) {
 
   const target = await exec(dir, process.execPath, ['scripts/harness-target.mjs', version, '--repoint', '--install'])
   if (target.code === 3) {
-    // Exit 3 is npm's own answer about the train's packages; a registry that
-    // did not answer is exit 1 and lands below as a failure. Only a required
-    // package that did not exist yet puts a train out of scope.
+    // Exit 3 is npm's own answer about the train's packages — `@deepseek-ai/dsh`
+    // itself does not install there — which the notice quotes. A registry that
+    // did not answer is exit 1 and lands below as a failure.
     row.install = 'skipped'
-    const why = /::notice[^:]*::(.*)$/m.exec(target.out)?.[1] ?? 'incomplete'
-    row.note = `${/\(predates\)/.test(why) ? 'out of scope' : 'incomplete upstream'}: ${why}`.slice(0, 240)
+    row.note = `incomplete upstream: ${/::notice[^:]*::(.*)$/m.exec(target.out)?.[1] ?? 'incomplete'}`.slice(0, 320)
+    await writeFile(join(dir, 'sweep.log'), target.out)
     return row
   }
   if (!target.ok) {
@@ -169,5 +173,5 @@ await writeFile(join(work, 'sweep.json'), `${JSON.stringify(rows, null, 2)}\n`)
 await writeFile(join(work, 'sweep.md'), `${lines.join('\n')}\n`)
 console.log(lines.join('\n'))
 console.error(`scratch copies and sweep.json/sweep.md: ${work}`)
-const failed = rows.filter((row) => row.typecheck === 'FAIL' || row.bundle === 'FAIL' || row.test === 'FAIL' || row.install === 'fail' || (row.install.startsWith('ok') && row.admitted !== 'yes'))
+const failed = rows.filter((row) => row.typecheck === 'FAIL' || row.bundle === 'FAIL' || row.test === 'FAIL' || row.install === 'fail' || row.admitted !== 'yes')
 process.exitCode = failed.length > 0 ? 1 : 0

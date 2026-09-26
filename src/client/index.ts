@@ -5,8 +5,11 @@
  * This plugin occupies the composer's attachment seat, which took the shipped
  * entry's drop listeners down with it, so its own listeners are the only ones
  * left. They sit on `document` in CAPTURE phase and stop the transfer there.
- * Each transfer is routed to the composer it landed on (the page can hold
- * more than one) and split:
+ * The trains without that seat (0.1.0-rc.7 and earlier) keep the composer's
+ * own image-only listeners on `document` in the bubble phase; stopping the
+ * transfer in the capture phase is what keeps them from taking the images a
+ * second time and from discarding everything else. Each transfer is routed to
+ * the composer it landed on (the page can hold more than one) and split:
  *
  * - **Images** the composer encodes natively (PNG, JPEG, WebP, GIF) go to that
  *   composer's own validated intake, and become ordinary image attachments.
@@ -57,6 +60,7 @@ import { acquireFolder, countFolder } from './folder-acquire.ts'
 import type { EntryLike } from '../folder.ts'
 import { RailRegistry, type RailRoute } from './registry.ts'
 import type { ScopeLike } from './composer-face.ts'
+import type { DraftImage, DraftImages, ImageLimits, ImageRefusal } from './early-composer.ts'
 
 export { createOverlay } from './overlay.ts'
 export type { Overlay, OverlayState } from './overlay.ts'
@@ -88,6 +92,16 @@ export { DropRail } from './DropRail.tsx'
 export type {
   DropRailInjected, DropRailProps, RailHandle, SeatAttachment, SeatUpload, SessionAccess, SessionInputLike,
 } from './DropRail.tsx'
+export { DockRail } from './DockRail.tsx'
+export type { DockRailInjected, DockRailProps } from './DockRail.tsx'
+export { DOCK_SLOT, REGION_SELECTOR, SEAT_SLOT, SeatWatch, wireRailSeats } from './rail-seats.ts'
+export type { RailPlacement, RailRegistrations, SlotDeclarations } from './rail-seats.ts'
+export {
+  acceptsDrop, addToDraft, draftImageIds, dropLimitsOf, imageLimitsOf, intakeImages,
+} from './early-composer.ts'
+export type {
+  DraftImage, DraftImages, DropLimits, ImageFile, ImageIntake, ImageIntakeResult, ImageLimits, ImageRefusal,
+} from './early-composer.ts'
 export { DropLightbox, usePreviewText } from './DropLightbox.tsx'
 export type { DropLightboxProps } from './DropLightbox.tsx'
 export { DROP_NS, en, zh } from './locales.ts'
@@ -127,9 +141,18 @@ interface DropSessions {
   scope(id: string): unknown
 }
 
-/** The conversation-service slice this plugin reads. */
+/**
+ * The conversation-service slice this plugin reads.
+ *
+ * The draft-image members are the early trains' (0.0.1-rc.5 – 0.1.0-rc.7),
+ * where the dock rail feeds the composer's own draft images; later trains
+ * hand the seat an intake instead, so they are optional.
+ */
 interface DropConversation {
   readonly input: { for(actx: never): SessionInputLike }
+  createDraftImages?(files: readonly File[]): readonly DraftImage<File>[]
+  draftImages?(ids: readonly never[]): readonly DraftImage<File>[]
+  releaseDraftImages?(images: readonly never[]): void
 }
 
 /**
@@ -276,8 +299,20 @@ export function apply(ctx: ClientContext): void {
     referenceFit ??= installReferenceFit()
   }
 
+  // The composer's draft images, for the dock rail's image intake on the
+  // trains without an attachment seat. Ids and descriptors travel back to the
+  // service exactly as it minted them.
+  const images: DraftImages<File> = {
+    create: (files) => conversation?.createDraftImages?.(files),
+    held: (ids) => conversation?.draftImages?.(ids as never[]) ?? [],
+    release: (created) => { conversation?.releaseDraftImages?.(created as never[]) },
+  }
+  const refuseImages = (sessionId: string, reason: ImageRefusal, limits: ImageLimits | undefined): void => {
+    notify(sessionId, 'error', messages().imageRefused(reason, limits))
+  }
+
   installDropStyles(ctx)
-  installPreviewRail(ctx, { store: previews, attached, registry, access, onLegacyComposer })
+  installPreviewRail(ctx, { store: previews, attached, registry, access, onLegacyComposer, images, refuseImages })
   // The staged paths reach the model only because this guard appends them to
   // the message as it is sent.
   ctx.effect(

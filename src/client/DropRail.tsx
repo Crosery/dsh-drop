@@ -26,6 +26,10 @@
  * The rail also registers itself with the plugin, per mount: the drop, paste
  * and send listeners find the composer a gesture belongs to through that
  * registration, because the page can hold more than one composer.
+ *
+ * On the trains without the seat the same component renders from the dock row
+ * above the card (`DockRail` supplies the seat's share); only how a mount
+ * finds its composer changes with the placement.
  * @module @crosery/dsh-drop/client/DropRail
  */
 
@@ -42,16 +46,18 @@ import type { ReactNode } from 'react'
 // to that train, so the props this component reads are restated below instead.
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
-import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import type { InjectFace, PropsLocale, PropsRuntime, SlotMap } from '@deepseek-ai/dsh-client-ui-slots'
 import { fileNameOf, freshFiles } from '../contract.ts'
 import { dropKindOf, formatDropBytes, kindBadge, type DropKind } from '../preview.ts'
 import type { AttachedFile } from './attached.ts'
+import type { DropLimits } from './early-composer.ts'
 import { composerFace, snapshotOf, type ActionsLike, type ComposerFace, type InputSnapshot, type ScopeLike } from './composer-face.ts'
 import { DropLightbox, usePreviewText, type FolderListing } from './DropLightbox.tsx'
 import { ChevronLeftGlyph, ChevronRightGlyph, CloseGlyph, FolderGlyph, PlayGlyph, RetryGlyph } from './icons.tsx'
 import { DROP_NS, type DropKey } from './locales.ts'
 import type { DropAsset } from './preview-store.ts'
 import type { RailRecord } from './registry.ts'
+import { REGION_SELECTOR, type RailPlacement, type SEAT_SLOT } from './rail-seats.ts'
 import { planRemovalFocus, settleRemovalFocus, type PendingFocus } from './rail-focus.ts'
 import { useRailOverflow } from './use-rail-overflow.ts'
 
@@ -74,11 +80,7 @@ const KIND_LABEL: Readonly<Record<RailKind, DropKey>> = {
 /** The kinds whose card is a thumbnail rather than an identity row. */
 const THUMBNAIL_KINDS: readonly RailKind[] = ['image', 'video']
 
-/** The composer limits the seat publishes for its drop invitation. */
-export interface DropLimits {
-  readonly count: number
-  readonly size: string
-}
+export type { DropLimits } from './early-composer.ts'
 
 /** One mounted rail, as the drop, paste and send listeners reach it. */
 export interface RailHandle extends RailRecord {
@@ -147,6 +149,12 @@ export interface DropRailInjected {
   }
   /** Unstage one file. */
   detach: (id: number) => void
+  /**
+   * Where this mount sits: inside the composer card in the attachment seat
+   * (the default), or in the dock row above it on the trains without that
+   * seat. Only how the mount finds its composer depends on it.
+   */
+  placement?: RailPlacement | undefined
 }
 
 /**
@@ -217,6 +225,28 @@ export interface SeatProps {
 }
 
 /**
+ * The session-kit members this rail reads from the runtime share, restated
+ * for the trains whose SlotMap has no attachment seat to derive them from.
+ */
+interface SeatKit {
+  /** Selector hook over the session's input state. */
+  useInput: <S>(selector: (state: never) => S) => S | undefined
+  /** The session's input action face. */
+  inputActions?: unknown
+}
+
+/**
+ * The seat's runtime share on the running train's types.
+ *
+ * Trains from 0.1.0-rc.8 declare the seat, and the share comes from their
+ * SlotMap as for any slot. The earlier trains' SlotMap has no such key — their
+ * composer has no seat, and the rail renders from the dock (`DockRail`) — so
+ * the members the rail reads are taken from {@link SeatKit} there instead.
+ * @typeParam K - the seat's key.
+ */
+type SeatRuntime<K extends string> = K extends keyof SlotMap & string ? PropsRuntime<K> : SeatKit
+
+/**
  * Full rail props: the seat's share, this plugin's injected face, and the
  * locale seat.
  *
@@ -225,7 +255,7 @@ export interface SeatProps {
  * framework synthesizes from the injected `hooks` compartment.
  */
 export type DropRailProps =
-  Omit<PropsRuntime<'conversation.input.attachments'>, keyof SeatProps>
+  Omit<SeatRuntime<typeof SEAT_SLOT>, keyof SeatProps>
   & SeatProps
   & InjectFace<DropRailInjected>
   & PropsLocale<typeof DROP_NS>
@@ -446,6 +476,28 @@ function listingFor(entry: AttachedFile): FolderListing | undefined {
 }
 
 /**
+ * The composer region a mount answers for: its card in the seat, the whole
+ * composer seat from the dock.
+ * @param anchor - the mount's anchor element.
+ * @param placement - where the mount sits.
+ * @returns the region, or null while detached.
+ */
+function regionOf(anchor: Element | null, placement: RailPlacement): Element | null {
+  return anchor?.closest(REGION_SELECTOR[placement]) ?? null
+}
+
+/**
+ * The composer card a mount belongs to.
+ * @param anchor - the mount's anchor element.
+ * @param placement - where the mount sits.
+ * @returns the card, or null while detached.
+ */
+function composerCardOf(anchor: Element | null, placement: RailPlacement): Element | null {
+  const region = regionOf(anchor, placement)
+  return placement === 'seat' || region === null ? region : region.querySelector('[data-composer-card]')
+}
+
+/**
  * The composer's attachment rail.
  *
  * Renders only a hidden anchor while nothing is attached, the same posture the
@@ -460,7 +512,7 @@ export function DropRail(props: DropRailProps): ReactNode {
     attachments, canAcceptDrop, onAddImages, onAddFiles, onRemoveImage, onRemoveAttachment,
     uploads, onRetryFile, dropLimits, useSession, useInput, inputActions, sessionId,
     assetOf, putAsset, releaseAsset, textOf, register, access, onLegacyComposer,
-    useAttached, detach, t,
+    useAttached, detach, placement = 'seat', t,
   } = props
   const attached = useAttached((staged) => staged)
   const [open, setOpen] = useState<string | null>(null)
@@ -491,7 +543,7 @@ export function DropRail(props: DropRailProps): ReactNode {
   }
 
   useEffect(() => {
-    const cardOf = (): Element | null => anchorRef.current?.closest('[data-composer-card]') ?? null
+    const cardOf = (): Element | null => composerCardOf(anchorRef.current, placement)
     const liveInput = (): InputSnapshot | undefined => {
       if (sessionId !== undefined) {
         // The session's own store answers the state as of this instant; the
@@ -517,8 +569,8 @@ export function DropRail(props: DropRailProps): ReactNode {
     const handle: RailHandle = {
       sessionId,
       contains: (target) => {
-        const card = cardOf()
-        return card !== null && target instanceof Node && card.contains(target)
+        const region = regionOf(anchorRef.current, placement)
+        return region !== null && target instanceof Node && region.contains(target)
       },
       canAcceptDrop: () => latest.current.canAcceptDrop ?? true,
       dropLimits: () => latest.current.dropLimits,
@@ -535,7 +587,7 @@ export function DropRail(props: DropRailProps): ReactNode {
       onLegacyComposer()
     }
     return register(handle)
-  }, [register, access, sessionId, onLegacyComposer])
+  }, [register, access, sessionId, onLegacyComposer, placement])
 
   // Composer file drafts carry no preview URL; their bytes are kept here for
   // the card and the lightbox (recorded while the items are built, which is
@@ -631,7 +683,7 @@ export function DropRail(props: DropRailProps): ReactNode {
     pendingFocus.current = null
     if (decision === 'drop') return
     const target = decision === 'composer'
-      ? anchorRef.current?.closest('[data-composer-card]')
+      ? composerCardOf(anchorRef.current, placement)
         ?.querySelector<HTMLElement>('[data-composer-input], textarea')
       : Array.from(wrap?.querySelectorAll<HTMLElement>('[data-dshdrop-key]') ?? [])
         .find((card) => card.dataset.dshdropKey === decision.card)
@@ -660,7 +712,7 @@ export function DropRail(props: DropRailProps): ReactNode {
   }
 
   return (
-    <div className="dshdrop-rail-wrap" ref={wrapRef}>
+    <div className="dshdrop-rail-wrap" data-placement={placement} ref={wrapRef}>
       {anchor}
       <div className="dshdrop-rail" ref={overflow.ref} role="group" aria-label={t('rail.label')}>
         {items.map((item) => (
