@@ -773,6 +773,15 @@ export function fileNameOf(path: string): string {
 const DATE_DIR = /^(\d{4})-(\d{2})-(\d{2})$/
 
 /**
+ * Whether a staging subdirectory has this plugin's own `YYYY-MM-DD` spelling.
+ * @param dirName - the immediate subdirectory name.
+ * @returns true for a day directory this plugin may have created.
+ */
+export function isStageDayDir(dirName: string): boolean {
+  return DATE_DIR.test(dirName)
+}
+
+/**
  * Whether a staging subdirectory is old enough to prune.
  *
  * The name has to match this plugin's own `YYYY-MM-DD` spelling before its age

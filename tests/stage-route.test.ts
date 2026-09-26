@@ -8,7 +8,7 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, it } from 'node:test'
 import { createServer, type Server } from 'node:http'
-import { mkdtemp, mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, readdir, symlink, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import type { AddressInfo } from 'node:net'
@@ -144,5 +144,82 @@ describe('pruneStage', () => {
 
   it('is a no-op before the first drop creates the root', async () => {
     assert.deepEqual(await pruneStage(join(tmpdir(), 'dsh-drop-absent-root'), 30, Date.now()), [])
+  })
+})
+
+describe('pruneStage, upload leftovers', () => {
+  const IDLE = 30 * 60_000
+  const now = Date.now()
+  const today = new Date(now).toISOString().slice(0, 10)
+
+  /** Backdate a path's own timestamps. */
+  const age = async (path: string, ms: number): Promise<void> => {
+    const at = new Date(now - ms)
+    await utimes(path, at, at)
+  }
+
+  /** A batch directory as `begin` lays it out, with one published file and one part. */
+  const batch = async (dir: string, name: string, idleFor: number, streamingFor?: number): Promise<string> => {
+    const home = join(dir, name)
+    await mkdir(join(home, 'tree', 'src'), { recursive: true })
+    await mkdir(join(home, 'parts'), { recursive: true })
+    await writeFile(join(home, 'tree', 'src', 'a.ts'), 'a')
+    await writeFile(join(home, 'parts', 'part-1'), 'partial')
+    await age(join(home, 'parts', 'part-1'), streamingFor ?? idleFor)
+    for (const path of [join(home, 'tree', 'src', 'a.ts'), join(home, 'tree', 'src'), join(home, 'tree'), join(home, 'parts'), home]) {
+      await age(path, idleFor)
+    }
+    return home
+  }
+
+  it('removes leftovers idle past the batch timeout, inside day directories only', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-drop-leftovers-'))
+    const day = join(root, today)
+    await mkdir(day)
+    const staleBatch = await batch(day, '.batch-stale', 2 * IDLE)
+    await batch(day, '.batch-fresh', 60_000)
+    await writeFile(join(day, '.incoming-stale'), 'x')
+    await age(join(day, '.incoming-stale'), 2 * IDLE)
+    await writeFile(join(day, '.incoming-fresh'), 'x')
+    await writeFile(join(day, 'notes.md'), 'a published drop')
+    await age(join(day, 'notes.md'), 2 * IDLE)
+    // Leftover names in the wrong place, or of the wrong kind, are not ours.
+    await batch(root, '.batch-at-root', 2 * IDLE)
+    await mkdir(join(root, 'my-stuff'))
+    await batch(join(root, 'my-stuff'), '.batch-parked', 2 * IDLE)
+    await mkdir(join(day, '.incoming-dir'))
+    await age(join(day, '.incoming-dir'), 2 * IDLE)
+    // A link is never followed out of the staging root.
+    const outside = await mkdtemp(join(tmpdir(), 'dsh-drop-outside-'))
+    await writeFile(join(outside, 'keep.txt'), 'keep')
+    await symlink(outside, join(day, '.batch-link'))
+
+    const removed = await pruneStage(root, 30, now, { leftoverIdleMs: IDLE })
+
+    assert.deepEqual(removed.sort(), [staleBatch, join(day, '.incoming-stale')].sort())
+    assert.deepEqual((await readdir(day)).sort(), ['.batch-fresh', '.batch-link', '.incoming-dir', '.incoming-fresh', 'notes.md'])
+    assert.equal(await readFile(join(outside, 'keep.txt'), 'utf8'), 'keep')
+    assert.deepEqual((await readdir(root)).sort(), ['.batch-at-root', today, 'my-stuff'])
+    assert.deepEqual(await readdir(join(root, 'my-stuff')), ['.batch-parked'])
+  })
+
+  it('keeps a batch whose part is still being written, however old its directories', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-drop-leftovers-live-'))
+    const day = join(root, today)
+    await mkdir(day)
+    await batch(day, '.batch-live', 2 * IDLE, 5_000)
+    assert.deepEqual(await pruneStage(root, 30, now, { leftoverIdleMs: IDLE }), [])
+    assert.deepEqual(await readdir(day), ['.batch-live'])
+  })
+
+  it('sweeps leftovers with retention off, and leaves them without the option', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-drop-leftovers-off-'))
+    const day = join(root, today)
+    await mkdir(day)
+    await writeFile(join(day, '.incoming-stale'), 'x')
+    await age(join(day, '.incoming-stale'), 2 * IDLE)
+    assert.deepEqual(await pruneStage(root, 30, now), [], 'a retention-only pass')
+    assert.deepEqual(await pruneStage(root, 0, now), [])
+    assert.deepEqual(await pruneStage(root, 0, now, { leftoverIdleMs: IDLE }), [join(day, '.incoming-stale')])
   })
 })

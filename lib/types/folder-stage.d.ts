@@ -28,6 +28,8 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { type FolderLimits } from './contract.ts';
 import { type BatchReceiver, type RequestRejection } from './stage-route.ts';
+/** A batch untouched for this long is removed. */
+export declare const BATCH_IDLE_MS: number;
 /** Runtime knobs of the batch route. */
 export interface BatchOptions {
     /** Absolute staging root. */

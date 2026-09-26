@@ -54,14 +54,14 @@ import {
 import { DropSettingsSchema } from './settings.ts'
 import { stageHandler, type RequestRejection } from './stage-route.ts'
 import { resolveHandler } from './resolve-route.ts'
-import { batchStore } from './folder-stage.ts'
+import { BATCH_IDLE_MS, batchStore } from './folder-stage.ts'
 import { pruneStage } from './prune.ts'
 
 export {
   BATCH_HEADER, BATCH_ROUTE, COMPOSER_IMAGE_MEDIA_TYPES, DEFAULT_FOLDER_IGNORE, DEFAULT_FOLDER_MAX_BYTES,
   DEFAULT_FOLDER_MAX_DEPTH, DEFAULT_FOLDER_MAX_FILES, DROP_SETTINGS_NAMESPACE, FOLDER_SAMPLE_SIZE,
   MTIME_TOLERANCE_MS, RELPATH_HEADER, RESOLVE_ROUTE, STAGE_DIR, STAGE_ROUTE,
-  fileNameOf, folderCandidate, folderLimitsOf, isComposerImageType, isIgnoredName, isPrunableStageDir,
+  fileNameOf, folderCandidate, folderLimitsOf, isComposerImageType, isIgnoredName, isPrunableStageDir, isStageDayDir,
   mentionFor, pathFromFileUrl, safeFolderName, safeRelativeSegments, safeStageName, stageCandidate,
   stageDayDir, uriListPaths,
 } from './contract.ts'
@@ -77,9 +77,10 @@ export {
 export type { BatchReceiver, RequestRejection, StageOptions } from './stage-route.ts'
 export { claimDirectory, claimMatches, readClaim, resolveHandler, summarizeDirectory } from './resolve-route.ts'
 export type { FolderRules, ResolveOptions } from './resolve-route.ts'
-export { batchStore, publishDirectory } from './folder-stage.ts'
+export { BATCH_IDLE_MS, batchStore, publishDirectory } from './folder-stage.ts'
 export type { BatchOptions, BatchStore } from './folder-stage.ts'
 export { pruneStage } from './prune.ts'
+export type { PruneOptions } from './prune.ts'
 
 /**
  * Settings namespace this plugin owns, as the settings service keys it.
@@ -325,13 +326,19 @@ export function apply(ctx: Context, config: Config): void {
   // rather than at the next boot; keying on the value keeps every other
   // committed settings change from re-walking the directory.
   let prunedWith: number | undefined
+  // The first pass, at activation, also clears what an upload interrupted by
+  // a crash left behind; later passes only re-apply retention, so a batch
+  // this Host is still filling is never in question.
+  let swept = false
   const prune = (): void => {
     const keepDays = source().keepDays
     if (keepDays === prunedWith) return
     prunedWith = keepDays
+    const options = swept ? {} : { leftoverIdleMs: BATCH_IDLE_MS }
+    swept = true
     // Detached on purpose: a slow or failing prune must not delay or fail
     // activation, and retention is hygiene rather than correctness.
-    void pruneStage(root, keepDays, Date.now()).catch((error: unknown) => {
+    void pruneStage(root, keepDays, Date.now(), options).catch((error: unknown) => {
       console.warn(`[dsh-drop] could not prune ${root}`, error)
     })
   }

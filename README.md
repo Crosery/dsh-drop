@@ -96,7 +96,7 @@ On **0.1.7**: settings.yaml is gone. Set the values on the plugin's profile entr
 
 The folder limits apply to copies only; a folder referenced in place has no size limit.
 
-Cleanup runs at activation and when retention changes. It deletes expired date-named directories, including manually added contents inside them; other names and loose files are untouched. Removing a card does **not** delete the staged copy.
+Cleanup runs at activation and when retention changes. It deletes expired date-named directories, including manually added contents inside them; other names and loose files are untouched. At activation it also removes what an interrupted upload left inside the date directories — hidden `.batch-*` folders and `.incoming-*` partial files not written to for 30 minutes — even with `keepDays` at 0. Removing a card does **not** delete the staged copy.
 
 ## Important limits
 

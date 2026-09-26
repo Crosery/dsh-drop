@@ -512,6 +512,12 @@ export declare function mentionFor(path: string, kind?: MentionKind): string | u
  */
 export declare function fileNameOf(path: string): string;
 /**
+ * Whether a staging subdirectory has this plugin's own `YYYY-MM-DD` spelling.
+ * @param dirName - the immediate subdirectory name.
+ * @returns true for a day directory this plugin may have created.
+ */
+export declare function isStageDayDir(dirName: string): boolean;
+/**
  * Whether a staging subdirectory is old enough to prune.
  *
  * The name has to match this plugin's own `YYYY-MM-DD` spelling before its age

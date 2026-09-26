@@ -39,16 +39,17 @@
 import type { Context } from '@deepseek-ai/cordis';
 import { type DropSettings } from './contract.ts';
 import { type RequestRejection } from './stage-route.ts';
-export { BATCH_HEADER, BATCH_ROUTE, COMPOSER_IMAGE_MEDIA_TYPES, DEFAULT_FOLDER_IGNORE, DEFAULT_FOLDER_MAX_BYTES, DEFAULT_FOLDER_MAX_DEPTH, DEFAULT_FOLDER_MAX_FILES, DROP_SETTINGS_NAMESPACE, FOLDER_SAMPLE_SIZE, MTIME_TOLERANCE_MS, RELPATH_HEADER, RESOLVE_ROUTE, STAGE_DIR, STAGE_ROUTE, fileNameOf, folderCandidate, folderLimitsOf, isComposerImageType, isIgnoredName, isPrunableStageDir, mentionFor, pathFromFileUrl, safeFolderName, safeRelativeSegments, safeStageName, stageCandidate, stageDayDir, uriListPaths, } from './contract.ts';
+export { BATCH_HEADER, BATCH_ROUTE, COMPOSER_IMAGE_MEDIA_TYPES, DEFAULT_FOLDER_IGNORE, DEFAULT_FOLDER_MAX_BYTES, DEFAULT_FOLDER_MAX_DEPTH, DEFAULT_FOLDER_MAX_FILES, DROP_SETTINGS_NAMESPACE, FOLDER_SAMPLE_SIZE, MTIME_TOLERANCE_MS, RELPATH_HEADER, RESOLVE_ROUTE, STAGE_DIR, STAGE_ROUTE, fileNameOf, folderCandidate, folderLimitsOf, isComposerImageType, isIgnoredName, isPrunableStageDir, isStageDayDir, mentionFor, pathFromFileUrl, safeFolderName, safeRelativeSegments, safeStageName, stageCandidate, stageDayDir, uriListPaths, } from './contract.ts';
 export type { BatchAbortOk, BatchBeginOk, BatchCommitOk, BatchFileOk, BatchLimitsOk, BatchRequest, DropSettings, FolderLimit, FolderLimits, FolderSampleEntry, FolderSummary, NameRules, ResolveOk, ResolveRequest, StageErr, StageOk, } from './contract.ts';
 export { DropSettingsSchema } from './settings.ts';
 export { crossSite, declaresJson, insideRoot, refused, requestedName, publishStage, sendJson, stageHandler, } from './stage-route.ts';
 export type { BatchReceiver, RequestRejection, StageOptions } from './stage-route.ts';
 export { claimDirectory, claimMatches, readClaim, resolveHandler, summarizeDirectory } from './resolve-route.ts';
 export type { FolderRules, ResolveOptions } from './resolve-route.ts';
-export { batchStore, publishDirectory } from './folder-stage.ts';
+export { BATCH_IDLE_MS, batchStore, publishDirectory } from './folder-stage.ts';
 export type { BatchOptions, BatchStore } from './folder-stage.ts';
 export { pruneStage } from './prune.ts';
+export type { PruneOptions } from './prune.ts';
 /**
  * Settings namespace this plugin owns, as the settings service keys it.
  *

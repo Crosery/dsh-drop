@@ -47,7 +47,7 @@ import {
 const MAX_BODY_BYTES = 4096
 
 /** A batch untouched for this long is removed. */
-const DEFAULT_IDLE_MS = 30 * 60_000
+export const BATCH_IDLE_MS = 30 * 60_000
 
 /** Most batches open at once; one per folder being uploaded. */
 const DEFAULT_MAX_OPEN = 8
@@ -210,7 +210,7 @@ async function readControl(req: IncomingMessage): Promise<BatchRequest | undefin
  */
 export function batchStore(opts: BatchOptions): BatchStore {
   const clock = opts.now ?? Date.now
-  const idleMs = opts.idleMs ?? DEFAULT_IDLE_MS
+  const idleMs = opts.idleMs ?? BATCH_IDLE_MS
   const maxOpen = opts.maxOpen ?? DEFAULT_MAX_OPEN
   const win32 = opts.win32 ?? process.platform === 'win32'
   const batches = new Map<string, Batch>()
