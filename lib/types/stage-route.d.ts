@@ -16,6 +16,59 @@
  * @module @crosery/dsh-drop/stage-route
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { type NameRules } from './contract.ts';
+/**
+ * The Host's own admission check for a raw Web route, when it has one.
+ *
+ * From 0.1.2 the harness can gate a Web route itself with
+ * `connection.requestRejection(req)`: its Host/Origin fence and its
+ * login-cookie authentication. Routes registered straight on `webServer` are
+ * otherwise open to any local caller. 0.1.0 and 0.1.1 have no such check, and
+ * the callback answers undefined there.
+ * @param req - the request.
+ * @returns 401 or 403 to refuse, 503 while the check itself is unavailable,
+ *   undefined to admit.
+ */
+export type RequestRejection = (req: IncomingMessage) => number | undefined;
+/**
+ * Answer a request the Host's admission check refused, if it did.
+ * @param reject - the admission check, when the Host has one.
+ * @param req - the request.
+ * @param res - the response, owned when the answer is true.
+ * @returns true when the request was refused and answered.
+ */
+export declare function refused(reject: RequestRejection | undefined, req: IncomingMessage, res: ServerResponse): boolean;
+/**
+ * Whether Fetch Metadata marks a request as coming from another site.
+ *
+ * Absent is admitted: non-browser clients never send it, and the desktop
+ * app's protocol forwarder strips it before the request reaches the Host.
+ * @param req - the request.
+ * @returns true when the browser declared a cross-origin caller.
+ */
+export declare function crossSite(req: IncomingMessage): boolean;
+/**
+ * Whether a request body is declared as JSON.
+ *
+ * `application/json` is not a CORS-safelisted type, so a cross-site page can
+ * only send it after a preflight these routes never grant: requiring it keeps
+ * a no-cors form post from reaching the handler.
+ * @param req - the request.
+ * @returns true for an `application/json` body.
+ */
+export declare function declaresJson(req: IncomingMessage): boolean;
+/** The one value of a request header, when it was sent exactly once. */
+export declare function headerOf(req: IncomingMessage, name: string): string | undefined;
+/** Where a file that belongs to a folder batch is handed. */
+export interface BatchReceiver {
+    /**
+     * Take one batch file's request, owning the full response.
+     * @param req - the upload.
+     * @param res - its response.
+     * @param id - the batch the request names.
+     */
+    receive(req: IncomingMessage, res: ServerResponse, id: string): Promise<void>;
+}
 /** Runtime knobs the route reads fresh on every request. */
 export interface StageOptions {
     /** Absolute staging root; re-read per request so a settings edit takes effect live. */
@@ -24,7 +77,20 @@ export interface StageOptions {
     maxBytes: () => number;
     /** Clock, injected so tests do not depend on the wall clock. */
     now?: () => number;
+    /** The Host's admission check, when the running harness has one. */
+    reject?: RequestRejection | undefined;
+    /** Folder batches; a request naming one is handed there. */
+    batches?: BatchReceiver | undefined;
+    /** Apply the Windows name rules; the running platform by default. */
+    win32?: boolean | undefined;
 }
+/**
+ * Answer with a JSON body and no cache.
+ * @param res - the response.
+ * @param status - HTTP status.
+ * @param body - payload.
+ */
+export declare function sendJson(res: ServerResponse, status: number, body: object): void;
 /**
  * Read the file name the browser declared.
  *
@@ -32,9 +98,10 @@ export interface StageOptions {
  * header values are not. A malformed encoding is not worth refusing over — the
  * sanitizer's fallback name is a better outcome than a failed drop.
  * @param req - the request.
+ * @param rules - the Host platform's name rules.
  * @returns a single safe path segment.
  */
-export declare function requestedName(req: IncomingMessage): string;
+export declare function requestedName(req: IncomingMessage, rules?: NameRules): string;
 /** Publish complete bytes atomically; link refuses an existing target. */
 export declare function publishStage(temp: string, dir: string, name: string): Promise<string>;
 /**

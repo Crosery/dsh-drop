@@ -23,6 +23,48 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
-      - run: npm run build
-      - run: npm run check
+      # The committed lib/ against a scratch build — before `npm run build`
+      # rewrites lib/ in place and makes any stale commit look current.
       - run: npm run check:dist
+      - name: Build, and require the tree to stay as committed
+        run: |
+          npm run build
+          if [ -n "$(git status --porcelain)" ]; then
+            git status --porcelain
+            echo "::error::npm run build changed the committed tree; commit what it builds"
+            exit 1
+          fi
+      - run: npm run check
+
+  # The same four stages harness-compat.yml runs on its schedule — types
+  # (with the bundle's seed reads), tests, peer admission and a real boot of
+  # the packed plugin — against the pinned train and the floor. These two gate
+  # a merge: in branch protection, require `node 22.19`, `node 24`,
+  # `harness / harness@pinned` and `harness / harness@floor`.
+  #
+  # `issues: write` (the verdict) and `actions: read` (the `unreported` job)
+  # are declared by the called workflow and never used here: `report` stays
+  # false, so nothing is filed and `unreported` does not run. A caller cannot
+  # grant a called workflow less than it declares. A fork's pull_request token
+  # is read-only regardless.
+  harness:
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+    uses: ./.github/workflows/harness-compat.yml
+    with:
+      cells: pinned,floor
+
+  # What the desktop app ships today, resolved from its update feeds, and the
+  # npm Web app at that exact version. Visible on every PR but deliberately not
+  # a required check: the feed moves under open PRs, and the scheduled run
+  # owns that signal.
+  desktop:
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+    uses: ./.github/workflows/harness-compat.yml
+    with:
+      cells: desktop

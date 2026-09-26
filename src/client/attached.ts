@@ -1,30 +1,77 @@
 /**
  * The files staged for the next message, held outside the draft.
  *
- * This is the file half of what `imageIds` is for images: an ordered list that
- * lives beside the draft rather than inside it, so the composer's text stays
- * exactly what the user typed. A dropped file leaves no character behind.
+ * This is the file half of what the composer's attachment ids are for images:
+ * an ordered list that lives beside the draft rather than inside it, so the
+ * composer's text stays exactly what the user typed. A dropped file leaves no
+ * character behind.
  *
- * Images can do this because the wire format has an image content block and
- * the composer carries `imageIds` through submit for it. Files have neither,
- * so the path has to reach the model as prompt text — which means somebody has
- * to splice it in at send time. That is the trade this module exists to make:
- * the draft is clean, and in exchange this plugin owns one interception point
- * (see `submit-guard.ts`).
+ * Images can do this because the wire format has an image content block.
+ * Files have none here, so the path has to reach the model as prompt text —
+ * which means somebody has to splice it in at send time. That is the trade
+ * this module exists to make: the draft is clean, and in exchange this plugin
+ * owns one interception point (see `submit-guard.ts`).
  *
- * Per session, because drafts are per session: switching sessions and coming
- * back has to find the same attachments, and sending in one session must not
- * empty another's.
+ * An entry exists from the moment of the drop, `pending` while its path is
+ * being acquired, so the card shows up at once and a send cannot leave
+ * without it. Per session, because drafts are per session: switching sessions
+ * and coming back has to find the same attachments, and sending in one
+ * session must not empty another's.
  * @module @crosery/dsh-drop/client/attached
  */
+
+import type { FolderSummary } from '../contract.ts'
+
+/** What one staged reference names. Directories are spelled with a trailing slash. */
+export type AttachedKind = 'file' | 'directory'
+
+/** A folder copy's progress, per file. */
+export interface AttachedProgress {
+  /** Files uploaded. */
+  readonly done: number
+  /** Files to upload. */
+  readonly total: number
+  /** Bytes uploaded. */
+  readonly bytes: number
+  /** Bytes to upload. */
+  readonly totalBytes: number
+}
+
+/** Where an entry is in its acquisition. */
+export type AttachedStatus = 'pending' | 'ready' | 'error'
+
+/** How a ready entry's path was obtained. */
+export type AttachedHow = 'in-place' | 'copied'
 
 /** One file staged for the next message. */
 export interface AttachedFile {
   /** Stable identity for React keys and removal; monotonic per store. */
   readonly id: number
-  /** Absolute path, as the model will receive it. */
-  readonly path: string
+  /** Preview-material key; stable for the entry's lifetime. */
+  readonly key: string
+  readonly kind: AttachedKind
+  readonly status: AttachedStatus
+  /** Display name, as the browser reported it. */
+  readonly name: string
+  /** Byte length, when known. */
+  readonly size?: number | undefined
+  /** Absolute path, as the model will receive it; present once `ready`. */
+  readonly path?: string | undefined
+  /** How the path was obtained; present once `ready`. */
+  readonly how?: AttachedHow | undefined
+  /** For a folder: what it holds, once counted. */
+  readonly summary?: FolderSummary | undefined
+  /** For a folder: relative paths of its first files, for the listing. */
+  readonly listing?: readonly string[] | undefined
+  /** For a folder being copied: how far the upload is. */
+  readonly progress?: AttachedProgress | undefined
 }
+
+/** The fields a caller supplies when staging; identity and key are assigned here. */
+export type AttachedInput = Omit<AttachedFile, 'id' | 'key'>
+
+/** Mutable fields of an existing entry. */
+export type AttachedUpdate = Partial<Pick<AttachedFile, 'status' | 'path' | 'how' | 'size' | 'summary' | 'listing' | 'progress'>>
 
 /** A subscribable, per-session list of staged files. */
 export class AttachedFiles {
@@ -43,20 +90,70 @@ export class AttachedFiles {
   /** The empty snapshot, shared so an untouched session is reference-stable. */
   private static readonly EMPTY: readonly AttachedFile[] = Object.freeze([])
 
+  /** Called once for every entry that leaves the store. */
+  private readonly onRelease: (entry: AttachedFile) => void
+
+  /**
+   * @param onRelease - called once for every entry that leaves the store, so
+   *   the preview material behind it can be released.
+   */
+  constructor(onRelease: (entry: AttachedFile) => void = () => {}) {
+    // Assigned by hand: Node's type stripping, which runs the test suite,
+    // refuses TypeScript parameter properties.
+    this.onRelease = onRelease
+  }
+
   /**
    * Stage one file for a session.
+   *
+   * A ready path already staged in the session is not staged twice: the
+   * existing entry is returned instead, and no second card appears.
    * @param sessionId - the owning session.
-   * @param path - absolute path to attach.
-   * @returns the staged entry.
+   * @param input - the entry's fields; a bare string stages a ready path.
+   * @returns the staged entry, or the existing one it duplicates.
    */
-  add(sessionId: string, path: string): AttachedFile {
+  add(sessionId: string, input: AttachedInput | string): AttachedFile {
+    const fields: AttachedInput = typeof input === 'string'
+      ? { kind: 'file', status: 'ready', name: nameOf(input), path: input }
+      : input
+    if (fields.status === 'ready' && fields.path !== undefined) {
+      const existing = this.findPath(sessionId, fields.path)
+      if (existing !== undefined) return existing
+    }
     this.seq += 1
-    const entry: AttachedFile = { id: this.seq, path }
+    const entry: AttachedFile = { ...fields, id: this.seq, key: `staged:${this.seq}` }
     const list = this.bySession.get(sessionId) ?? []
     list.push(entry)
     this.bySession.set(sessionId, list)
     this.publish(sessionId)
     return entry
+  }
+
+  /**
+   * Change one entry, typically `pending` → `ready`.
+   *
+   * Becoming ready with a path another ready entry already holds removes this
+   * entry instead: the reference is already staged.
+   * @param sessionId - the owning session.
+   * @param id - the entry's identity.
+   * @param update - the fields to change.
+   * @returns the entry now standing for the file, or undefined when it is gone.
+   */
+  update(sessionId: string, id: number, update: AttachedUpdate): AttachedFile | undefined {
+    const list = this.bySession.get(sessionId)
+    const at = list?.findIndex((entry) => entry.id === id) ?? -1
+    if (list === undefined || at < 0) return undefined
+    const next: AttachedFile = { ...list[at]!, ...update }
+    if (next.status === 'ready' && next.path !== undefined) {
+      const existing = this.findPath(sessionId, next.path, id)
+      if (existing !== undefined) {
+        this.remove(sessionId, id)
+        return existing
+      }
+    }
+    list[at] = next
+    this.publish(sessionId)
+    return next
   }
 
   /**
@@ -67,23 +164,32 @@ export class AttachedFiles {
   remove(sessionId: string, id: number): void {
     const list = this.bySession.get(sessionId)
     if (list === undefined) return
-    const next = list.filter((entry) => entry.id !== id)
-    if (next.length === list.length) return
-    this.bySession.set(sessionId, next)
+    const gone = list.filter((entry) => entry.id === id)
+    if (gone.length === 0) return
+    this.bySession.set(sessionId, list.filter((entry) => entry.id !== id))
     this.publish(sessionId)
+    for (const entry of gone) this.onRelease(entry)
   }
 
   /**
-   * Clear a session's staged files.
+   * Clear staged files after a send carried them out.
    *
-   * Called after a send commits: the paths went out with that message, and
-   * leaving them staged would silently attach them to the next one too.
+   * Called only once the send is observed: the paths went out with that
+   * message, and leaving them staged would silently attach them to the next
+   * one too.
    * @param sessionId - the owning session.
+   * @param ids - the entries that were sent; all of the session's when omitted.
    */
-  clear(sessionId: string): void {
-    if ((this.bySession.get(sessionId)?.length ?? 0) === 0) return
-    this.bySession.delete(sessionId)
+  clear(sessionId: string, ids?: readonly number[]): void {
+    const list = this.bySession.get(sessionId)
+    if (list === undefined || list.length === 0) return
+    const gone = ids === undefined ? list : list.filter((entry) => ids.includes(entry.id))
+    if (gone.length === 0) return
+    const kept = ids === undefined ? [] : list.filter((entry) => !ids.includes(entry.id))
+    if (kept.length === 0) this.bySession.delete(sessionId)
+    else this.bySession.set(sessionId, kept)
     this.publish(sessionId)
+    for (const entry of gone) this.onRelease(entry)
   }
 
   /**
@@ -96,6 +202,16 @@ export class AttachedFiles {
   }
 
   /**
+   * One session's entries by status.
+   * @param sessionId - the owning session.
+   * @param status - the status to select.
+   * @returns the matching entries, in order.
+   */
+  withStatus(sessionId: string, status: AttachedStatus): readonly AttachedFile[] {
+    return this.list(sessionId).filter((entry) => entry.status === status)
+  }
+
+  /**
    * Subscribe to changes in any session's list.
    * @param listener - called after every mutation.
    * @returns the unsubscribe function.
@@ -103,6 +219,12 @@ export class AttachedFiles {
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener)
     return () => { this.listeners.delete(listener) }
+  }
+
+  /** A ready entry holding `path`, other than `except`. */
+  private findPath(sessionId: string, path: string, except?: number): AttachedFile | undefined {
+    return this.bySession.get(sessionId)
+      ?.find((entry) => entry.id !== except && entry.status === 'ready' && entry.path === path)
   }
 
   /** Re-freeze one session's snapshot and notify subscribers. */
@@ -117,8 +239,16 @@ export class AttachedFiles {
   }
 }
 
+/** Last path segment, trailing separators ignored. */
+function nameOf(path: string): string {
+  const trimmed = path.replace(/[\\/]+$/, '')
+  const cut = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'))
+  return cut < 0 ? trimmed : trimmed.slice(cut + 1)
+}
+
 /**
- * The text actually sent, with the staged mentions spliced in.
+ * The text actually sent on the textarea composer, with the staged mentions
+ * spliced in.
  *
  * **The user's words lead and the mentions follow.** Not for the model's sake —
  * it reads either order — but for the session title, which is derived from the
@@ -131,9 +261,7 @@ export class AttachedFiles {
  * ends without punctuation.
  *
  * An empty draft is fine: a message that is only attachments is a real request
- * ("look at these"), and the model receives the mentions alone. This is the
- * one thing the draft-resident design could not do — the composer refuses to
- * submit an empty draft, so a file with no typed words had nothing to ride on.
+ * ("look at these"), and the model receives the mentions alone.
  * @param draft - what the user typed, verbatim.
  * @param mentions - staged `@` mentions, in attachment order.
  * @returns the prompt text to submit.

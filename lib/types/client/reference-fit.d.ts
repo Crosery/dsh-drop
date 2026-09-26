@@ -1,5 +1,13 @@
 /**
- * Two corrections to how the shipped UI renders `@` file references.
+ * Two corrections to how the textarea composer renders `@` file references.
+ *
+ * **Train-specific.** The markup these rules target — `data-decoration="chip"`
+ * and `data-ref-chip` — exists only on the 0.1.0–0.1.1 trains, where the
+ * composer is a `<textarea>` over a mirror layer. From 0.1.2 the composer is a
+ * Lexical editor whose chips are decorator nodes, and neither attribute is
+ * emitted anywhere in the shipped bundles. The stylesheet is therefore
+ * installed only once a rail finds itself inside a textarea composer, rather
+ * than injected into every page as inert CSS.
  *
  * Neither is this plugin's own markup — both are upstream's, and both affect
  * every reference in the app, including the ones the `@` completion menu

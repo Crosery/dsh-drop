@@ -7,8 +7,8 @@
  * transport controls, a PDF goes to the browser's own viewer, and a text file
  * renders as monospaced source. A format with no in-page renderer — Word,
  * Keynote, an archive — says so rather than showing a broken frame; the file
- * is still referenced in the draft either way, so the preview failing is not
- * the send failing.
+ * is still attached either way, so the preview failing is not the send
+ * failing.
  *
  * Focus is moved in on mount, cycled inside the dialog while it is open, and
  * restored to the opener on unmount. That last part matters because the opener
@@ -20,11 +20,21 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode, ReactPortal } from 'react'
 import { createPortal } from 'react-dom'
-import { IconCloseOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import { formatDropBytes } from '../preview.ts'
+import { CloseGlyph } from './icons.tsx'
 import type { DropAsset } from './preview-store.ts'
 import { DROP_NS } from './locales.ts'
+
+/** What a folder's preview lists. */
+export interface FolderListing {
+  /** Relative paths of its first files. */
+  readonly paths: readonly string[]
+  /** Files counted but not listed. */
+  readonly more: number
+  /** Whether the count itself stopped short, so `more` is a lower bound. */
+  readonly atLeast: boolean
+}
 
 /** Props of the expanded preview. */
 export interface DropLightboxProps {
@@ -34,6 +44,10 @@ export interface DropLightboxProps {
   asset: DropAsset | undefined
   /** Decoded text for the `text` kind; undefined while loading or unavailable. */
   text: string | undefined
+  /** Whether the item is a folder, which shows a listing instead of a stage. */
+  folder?: boolean | undefined
+  /** A folder's listing; undefined while it is still being read. */
+  listing?: FolderListing | undefined
   /** Dismissal (Escape, mask press, close control). */
   onClose: () => void
   /** This plugin's namespace translator. */
@@ -87,11 +101,28 @@ function Stage({ asset, text, t }: Pick<DropLightboxProps, 'asset' | 'text' | 't
 }
 
 /**
- * Show one dropped file at full size.
- * @param props - name, asset, decoded text, dismissal, translator.
+ * A folder's listing: its first files' relative paths, as plain text.
+ *
+ * Paths come from the dropped tree, which the user did not necessarily
+ * write, so they are rendered as text nodes — never as links or markup.
+ * @param props - the listing, or undefined while it is being read.
+ * @returns the listing element.
+ */
+function Listing({ listing, t }: { listing: FolderListing | undefined, t: DropLightboxProps['t'] }): ReactNode {
+  if (listing === undefined) return <div className="dshdrop-stageEmpty">{t('listing.counting')}</div>
+  if (listing.paths.length === 0) return <div className="dshdrop-stageEmpty">{t('listing.empty')}</div>
+  const more = listing.more > 0 || listing.atLeast
+    ? `\n${t('listing.more', { count: `${listing.more}${listing.atLeast ? '+' : ''}` })}`
+    : ''
+  return <pre className="dshdrop-stageText" data-listing="">{listing.paths.join('\n')}{more}</pre>
+}
+
+/**
+ * Show one dropped file at full size, or one folder's listing.
+ * @param props - name, asset, decoded text, listing, dismissal, translator.
  * @returns the dialog, portalled to the document body.
  */
-export function DropLightbox({ name, asset, text, onClose, t }: DropLightboxProps): ReactPortal | null {
+export function DropLightbox({ name, asset, text, folder, listing, onClose, t }: DropLightboxProps): ReactPortal | null {
   const dialogRef = useRef<HTMLDivElement | null>(null)
   const closeRef = useRef<HTMLButtonElement | null>(null)
   const openerRef = useRef<HTMLElement | null>(null)
@@ -108,8 +139,8 @@ export function DropLightbox({ name, asset, text, onClose, t }: DropLightboxProp
       const dialog = dialogRef.current
       if (dialog === null) return
       // Contain tab navigation: the composer behind this dialog is still a
-      // focusable textarea, and tabbing into it would leave an open modal
-      // over an input the user cannot see they are typing into.
+      // focusable input, and tabbing into it would leave an open modal over
+      // an input the user cannot see they are typing into.
       const stops = focusables(dialog)
       if (stops.length === 0) return
       const first = stops[0]!
@@ -151,11 +182,13 @@ export function DropLightbox({ name, asset, text, onClose, t }: DropLightboxProp
           aria-label={t('action.close')}
           onClick={onClose}
         >
-          <IconCloseOutline16 size={16} />
+          <CloseGlyph size={16} />
         </button>
       </div>
       <div className="dshdrop-stage">
-        <Stage asset={asset} text={text} t={t} />
+        {folder === true
+          ? <Listing listing={listing} t={t} />
+          : <Stage asset={asset} text={text} t={t} />}
       </div>
     </div>,
     document.body,
@@ -168,7 +201,7 @@ export function DropLightbox({ name, asset, text, onClose, t }: DropLightboxProp
  * A hook rather than an effect inside {@link DropLightbox} so the dialog stays
  * a pure function of its props: the caller owns the async read, and a preview
  * of a file that does not render as text never starts one.
- * @param path - the previewed path, or null when nothing text-shaped is open.
+ * @param path - the previewed attachment key, or null when nothing text-shaped is open.
  * @param read - the store's decoder.
  * @returns the decoded text, or undefined while loading or unavailable.
  */

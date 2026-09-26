@@ -8,10 +8,12 @@
  * sitting in the same composer should answer it the same way rather than
  * inventing a second convention.
  *
- * Geometry is re-read on scroll, on card-count changes, and on rail resize —
- * a `ResizeObserver` rather than a window listener, because the composer also
- * narrows when the sidebar or the details panel opens, and neither of those
- * resizes the window.
+ * Geometry is re-read on scroll, on card-count changes, when the rail resizes
+ * and when any card does — a `ResizeObserver` rather than a window listener,
+ * because the composer also narrows when the sidebar or the details panel
+ * opens, and neither of those resizes the window; and on the cards too,
+ * because a folder card widens once its file count arrives, which changes
+ * nothing else about the rail.
  * @module @crosery/dsh-drop/client/use-rail-overflow
  */
 /** Which edges of the rail have content beyond them, plus the pager. */

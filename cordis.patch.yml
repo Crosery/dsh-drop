@@ -4,10 +4,12 @@
 # Cordis plugin); the `dsh.client` declaration in package.json is what makes the
 # web app also load the ./client bundle as the browser half.
 #
-# The row carries no config, so both settings keep their schema defaults: a
-# 512 MiB per-file ceiling and 30-day retention on the staging directory. Those
-# live in the `crosery-drop` settings namespace and are editable in
-# $DSH_HOME/settings.yaml without a restart. To pin a deployment default
+# The row carries no config, so every setting keeps its schema default: a
+# 512 MiB per-file ceiling, 30-day retention on the staging directory, and the
+# folder-copy limits (2000 files, 512 MiB, 32 levels, the default ignore list).
+# On 0.1.0–0.1.6 those live in the `crosery-drop` settings namespace and are
+# editable in $DSH_HOME/settings.yaml without a restart; on 0.1.7 set them on
+# this row. To pin a deployment default
 # instead, restate the WHOLE config block — a patch replaces a row's config
 # rather than merging into it:
 #

@@ -7,8 +7,8 @@
  * transport controls, a PDF goes to the browser's own viewer, and a text file
  * renders as monospaced source. A format with no in-page renderer — Word,
  * Keynote, an archive — says so rather than showing a broken frame; the file
- * is still referenced in the draft either way, so the preview failing is not
- * the send failing.
+ * is still attached either way, so the preview failing is not the send
+ * failing.
  *
  * Focus is moved in on mount, cycled inside the dialog while it is open, and
  * restored to the opener on unmount. That last part matters because the opener
@@ -20,6 +20,15 @@ import type { ReactPortal } from 'react';
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots';
 import type { DropAsset } from './preview-store.ts';
 import { DROP_NS } from './locales.ts';
+/** What a folder's preview lists. */
+export interface FolderListing {
+    /** Relative paths of its first files. */
+    readonly paths: readonly string[];
+    /** Files counted but not listed. */
+    readonly more: number;
+    /** Whether the count itself stopped short, so `more` is a lower bound. */
+    readonly atLeast: boolean;
+}
 /** Props of the expanded preview. */
 export interface DropLightboxProps {
     /** Display name shown in the header and used as the dialog's accessible name. */
@@ -28,24 +37,28 @@ export interface DropLightboxProps {
     asset: DropAsset | undefined;
     /** Decoded text for the `text` kind; undefined while loading or unavailable. */
     text: string | undefined;
+    /** Whether the item is a folder, which shows a listing instead of a stage. */
+    folder?: boolean | undefined;
+    /** A folder's listing; undefined while it is still being read. */
+    listing?: FolderListing | undefined;
     /** Dismissal (Escape, mask press, close control). */
     onClose: () => void;
     /** This plugin's namespace translator. */
     t: TranslateNS<typeof DROP_NS>;
 }
 /**
- * Show one dropped file at full size.
- * @param props - name, asset, decoded text, dismissal, translator.
+ * Show one dropped file at full size, or one folder's listing.
+ * @param props - name, asset, decoded text, listing, dismissal, translator.
  * @returns the dialog, portalled to the document body.
  */
-export declare function DropLightbox({ name, asset, text, onClose, t }: DropLightboxProps): ReactPortal | null;
+export declare function DropLightbox({ name, asset, text, folder, listing, onClose, t }: DropLightboxProps): ReactPortal | null;
 /**
  * Load one path's decoded text while a preview is open.
  *
  * A hook rather than an effect inside {@link DropLightbox} so the dialog stays
  * a pure function of its props: the caller owns the async read, and a preview
  * of a file that does not render as text never starts one.
- * @param path - the previewed path, or null when nothing text-shaped is open.
+ * @param path - the previewed attachment key, or null when nothing text-shaped is open.
  * @param read - the store's decoder.
  * @returns the decoded text, or undefined while loading or unavailable.
  */

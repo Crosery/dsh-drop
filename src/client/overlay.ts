@@ -1,25 +1,29 @@
 /**
- * The drop invitation shown for file drags this plugin claims.
+ * The drop invitation shown while files are dragged over the page.
  *
- * Plain DOM rather than a slot component. The shipped overlay lives inside
- * `conversation.input.attachments` and says "drag images here", with a disabled
- * variant when the current route takes no images — copy that is wrong twice
- * over for a dropped `.md`, and actively misleading in the disabled case, since
- * this plugin accepts the drop the overlay is declining. Suppressing the
- * shipped overlay for these drags and drawing our own is the only way the two
- * stay in agreement, and one absolutely-positioned element needs no React.
+ * Plain DOM rather than a slot component. The shipped overlay lives inside the
+ * attachment seat this plugin occupies, so it is gone, and its copy described
+ * images only. One absolutely-positioned element needs no React, and it can
+ * sit above every composer on the page at once.
+ *
+ * It has two faces. The invitation says what happens to each kind of file and
+ * repeats the composer's image limits. The blocked face appears when the
+ * composer under the pointer refuses files — a subagent's composer, a
+ * composer mid-send, a blank composer with no session — so the user learns
+ * why before letting go rather than after.
  * @module @crosery/dsh-drop/client/overlay
  */
+
+import { messages } from './messages.ts'
 
 /** Style tag id, matching the convention other client bundles use. */
 const STYLE_ID = '@crosery/dsh-drop/overlay.css'
 
-/** Copy, by the two locales the shipped dictionaries carry. */
-const COPY = {
-  zh: { title: '拖入文件', desc: '图片直接附加，其他文件插入为 @ 文件引用' },
-  en: { title: 'Drop files here', desc: 'Images attach; other files are inserted as @ file references' },
-} as const
-
+/**
+ * Every color is a theme token both harness trains define, so the card follows
+ * light and dark palettes: the composer's own surface, its primary label, and
+ * its layer-2 border. The fallbacks only apply outside the app shell.
+ */
 const CSS = `
 .dsh-drop-overlay {
   position: fixed;
@@ -37,17 +41,24 @@ const CSS = `
   flex-direction: column;
   gap: 6px;
   align-items: center;
+  max-width: min(440px, calc(100vw - 48px));
   padding: 20px 28px;
   border-radius: 16px;
-  border: 2px dashed var(--dsw-alias-border-2, rgba(255, 255, 255, 0.6));
-  background: var(--dsw-alias-bg-1, #fff);
-  color: var(--dsw-alias-text-1, #111);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+  border: 2px dashed var(--dsw-alias-border-l2, rgba(127, 127, 127, 0.6));
+  background: var(--dsw-specific-input-major, Canvas);
+  color: var(--dsw-alias-label-primary, CanvasText);
+  box-shadow: var(--dsw-shadow-lv2, 0 8px 32px rgba(0, 0, 0, 0.18));
   font-size: 14px;
+  line-height: 20px;
   text-align: center;
 }
+.dsh-drop-overlay[data-blocked] .dsh-drop-overlay-card {
+  border-color: var(--dsw-alias-state-error-primary, #d33);
+}
 .dsh-drop-overlay-title { font-size: 16px; font-weight: 600; }
-.dsh-drop-overlay-desc { opacity: 0.7; }
+.dsh-drop-overlay-desc,
+.dsh-drop-overlay-limits { color: var(--dsw-alias-label-secondary, inherit); }
+.dsh-drop-overlay-limits { font-size: 12px; }
 @media (prefers-reduced-motion: no-preference) {
   .dsh-drop-overlay { animation: dsh-drop-fade 120ms ease-out; }
   @keyframes dsh-drop-fade { from { opacity: 0 } to { opacity: 1 } }
@@ -71,52 +82,76 @@ function installStyles(): void {
   document.head.appendChild(tag)
 }
 
-/** Pick the copy matching the document language, defaulting to Chinese. */
-function copy(): { title: string, desc: string } {
-  return document.documentElement.lang.toLowerCase().startsWith('en') ? COPY.en : COPY.zh
+/** What the overlay shows for the composer under the pointer. */
+export interface OverlayState {
+  /** The composer refuses the drop; `noSession` says why. */
+  blocked: boolean
+  /** No session is open at all. */
+  noSession: boolean
+  /** The composer's image limits, when it publishes them. */
+  limits?: { readonly count: number, readonly size: string } | undefined
 }
 
 /** Show and hide handles over one overlay element. */
 export interface Overlay {
-  show(): void
+  show(state: OverlayState): void
   hide(): void
   dispose(): void
+}
+
+/** The three text lines for one state. */
+function linesFor(state: OverlayState): [title: string, desc: string, limits: string] {
+  const copy = messages()
+  if (state.blocked) {
+    return [copy.overlayBlockedTitle, state.noSession ? copy.overlayNoSession : copy.overlayBusy, '']
+  }
+  const limits = state.limits === undefined ? '' : copy.overlayLimits(state.limits.count, state.limits.size)
+  return [copy.overlayTitle, copy.overlayDesc, limits]
 }
 
 /**
  * Create the overlay controller.
  *
  * The element is built lazily and removed on hide, so a session that never
- * receives a drop carries no extra node.
+ * receives a drop carries no extra node. `show` is called on every dragover
+ * and only touches the DOM when the state it shows changes.
  * @returns the controller; `dispose` removes any element still mounted.
  */
 export function createOverlay(): Overlay {
   let element: HTMLElement | undefined
+  let shown = ''
 
   const hide = (): void => {
     element?.remove()
     element = undefined
+    shown = ''
   }
 
   return {
-    show() {
-      if (element !== undefined) return
+    show(state) {
+      const lines = linesFor(state)
+      const signature = `${String(state.blocked)}|${lines.join('|')}`
+      if (element !== undefined && signature === shown) return
       installStyles()
-      const text = copy()
-      const host = document.createElement('div')
-      host.className = 'dsh-drop-overlay'
+      if (element === undefined) {
+        element = document.createElement('div')
+        element.className = 'dsh-drop-overlay'
+        element.setAttribute('role', 'status')
+        document.body.appendChild(element)
+      }
+      element.toggleAttribute('data-blocked', state.blocked)
       const card = document.createElement('div')
       card.className = 'dsh-drop-overlay-card'
-      const title = document.createElement('div')
-      title.className = 'dsh-drop-overlay-title'
-      title.textContent = text.title
-      const desc = document.createElement('div')
-      desc.className = 'dsh-drop-overlay-desc'
-      desc.textContent = text.desc
-      card.append(title, desc)
-      host.append(card)
-      document.body.appendChild(host)
-      element = host
+      const [titleText, descText, limitsText] = lines
+      for (const [name, text] of [['title', titleText], ['desc', descText], ['limits', limitsText]] as const) {
+        if (text === '') continue
+        const line = document.createElement('div')
+        line.className = `dsh-drop-overlay-${name}`
+        line.textContent = text
+        card.append(line)
+      }
+      element.replaceChildren(card)
+      shown = signature
     },
     hide,
     dispose: hide,

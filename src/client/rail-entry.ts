@@ -1,5 +1,5 @@
 /**
- * Registering the attachment rail, and the bridge back to the drop pipeline.
+ * Registering the attachment rail.
  *
  * Split from the client entry so the entry keeps one job — translating a
  * `DataTransfer` into acquired paths — and so the slot registration, the only
@@ -13,10 +13,10 @@
  * rather than adding is the point — images and files belong in one strip, and
  * a single seat is the only place they can share.
  *
- * Two duties come with the seat. The rail renders draft images from the owner
- * props, and the shipped entry's document-level image intake goes away, so the
- * drop pipeline has to feed images back through the seat's own `onAddImages`.
- * {@link imageIntakeBridge} is that path.
+ * Two duties come with the seat. The rail renders the composer's drafts from
+ * the owner props, and the shipped entry's document-level drop handling goes
+ * away with it, so the drop pipeline feeds images back through the seat's own
+ * intake. Each mounted rail registers with the {@link RailRegistry} for that.
  * @module @crosery/dsh-drop/client/rail-entry
  */
 
@@ -29,10 +29,10 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { AttachedFile, AttachedFiles } from './attached.ts'
-import { DropRail, type ComposerBinding } from './DropRail.tsx'
+import { DropRail, type RailHandle, type SessionAccess } from './DropRail.tsx'
 import { DROP_NS, en, zh } from './locales.ts'
 import type { PreviewStore } from './preview-store.ts'
-import type { ComposerHandle } from './submit-guard.ts'
+import type { RailRegistry } from './registry.ts'
 
 /**
  * Shadowing rank for the attachment seat.
@@ -46,86 +46,41 @@ const RAIL_PRIORITY = -1
 /** The no-session snapshot; shared so its identity is stable across reads. */
 const EMPTY: readonly AttachedFile[] = Object.freeze([])
 
-/**
- * The composer's image intake, published by the mounted rail.
- *
- * A mutable holder rather than a parameter because the two sides live in
- * different worlds: `onAddImages` is an owner prop, reachable only inside the
- * rendered component, while the drag listeners that need it are installed in
- * the plugin's apply scope. The rail writes on mount and clears on unmount, so
- * a transfer arriving with no composer mounted finds `undefined` and the
- * images are declined rather than dropped into nothing.
- */
-export interface ImageIntakeBridge {
-  /** Called by the rail as it mounts and unmounts. */
-  bind: (intake: ((files: readonly File[]) => void) | undefined) => void
-  /** The live intake, or undefined when no rail is mounted. */
-  current: () => ((files: readonly File[]) => void) | undefined
-}
-
-/**
- * Create the holder connecting the mounted rail to the drag listeners.
- * @returns the bridge.
- */
-export function imageIntakeBridge(): ImageIntakeBridge {
-  let intake: ((files: readonly File[]) => void) | undefined
-  return {
-    bind: (next) => { intake = next },
-    current: () => intake,
-  }
-}
-
-/**
- * The mounted composer's verbs, for the submit guard.
- *
- * Same shape and same reason as {@link ImageIntakeBridge}: the draft, its write
- * path and the submit trigger are props, reachable only inside the rendered
- * rail, while the guard's listeners live in the plugin's apply scope.
- */
-export interface ComposerBridge {
-  /** Called by the rail as its session's composer mounts, changes, and unmounts. */
-  bind: (handle: ComposerBinding | undefined) => void
-  /** The live composer, or undefined when none is mounted. */
-  current: () => ComposerHandle | undefined
-}
-
-/**
- * Create the holder connecting the mounted rail to the submit guard.
- * @returns the bridge.
- */
-export function composerBridge(): ComposerBridge {
-  let handle: ComposerBinding | undefined
-  return {
-    bind: (next) => { handle = next },
-    current: () => handle,
-  }
+/** What the rail registration is built from. */
+export interface RailDeps {
+  /** The preview material the rail reads. */
+  store: PreviewStore
+  /** The staged references. */
+  attached: AttachedFiles
+  /** Where each mounted rail registers. */
+  registry: RailRegistry<RailHandle>
+  /** The session services the send path reads through. */
+  access: SessionAccess
+  /** Called when a rail finds itself in a textarea composer (0.1.0–0.1.1). */
+  onLegacyComposer: () => void
 }
 
 /**
  * Mount the attachment rail for the plugin's lifetime.
  *
  * Nested inject rather than a top-level one: without `slots` or `locale` the
- * drop path still works — files are acquired and referenced exactly as before,
- * they simply have no rail, and the shipped image rail keeps its seat — while
- * a hard requirement would turn a missing UI service into a boot failure.
+ * rail cannot render, but a hard requirement would turn a missing UI service
+ * into a boot failure.
  * @param ctx - browser plugin context.
- * @param store - the preview material the rail reads.
- * @param bridge - the image-intake holder the rail publishes into.
+ * @param deps - the stores, the registry, and the session access.
  */
-export function installPreviewRail(
-  ctx: ClientContext,
-  store: PreviewStore,
-  images: ImageIntakeBridge,
-  composer: ComposerBridge,
-  attached: AttachedFiles,
-): void {
+export function installPreviewRail(ctx: ClientContext, deps: RailDeps): void {
+  const { store, attached, registry, access, onLegacyComposer } = deps
   // The session-independent members are built once; a fresh object per inject
   // call would break the entry's memoization.
   const shared = {
-    assetOf: (path: string) => store.get(path),
-    textOf: (path: string) => store.text(path),
-    bindImageIntake: images.bind,
-    bindComposer: composer.bind,
+    assetOf: (key: string) => store.get(key),
+    putAsset: (key: string, file: File) => { store.put(key, file) },
+    releaseAsset: (key: string) => { store.release(key) },
+    textOf: (key: string) => store.text(key),
+    register: (rail: RailHandle) => registry.register(rail),
+    access,
+    onLegacyComposer,
   }
 
   ctx.inject(['slots', 'locale'], (scoped) => {
@@ -144,9 +99,9 @@ export function installPreviewRail(
       // and the rail re-renders on every drop and removal.
       //
       // `sessionId` arrives as the factory's parameter — the framework-resolved
-      // current session, `undefined` while none is selected. It used to arrive
-      // as a standard prop; 0.1.2 stopped merging it there, so the rail takes it
-      // from this share and works on either train.
+      // session of this occurrence, `undefined` on a blank composer. Each
+      // composer on the page gets its own occurrence, so a second composer
+      // (the subagent sidebar) gets its own session here too.
       inject: (sessionId) => ({
         ...shared,
         sessionId,
