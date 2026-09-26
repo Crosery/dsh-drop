@@ -42,7 +42,7 @@ export { installSubmitGuard, isSendKey } from './submit-guard.ts';
 export type { SubmitGuardDeps } from './submit-guard.ts';
 export { appendMentions, composerFace, snapshotOf, withdrawMentions, } from './composer-face.ts';
 export type { Appended, ComposerFace, ComposerParts, InputSnapshot } from './composer-face.ts';
-export { acceptsSubmission, appendSpan, detectEnd, insertedSpan, isLexicalSendKey, lexicalEnterVerdict, mentionBlock, primaryRoleOf, sendButtonVerdict, sendObserved, } from './send-plan.ts';
+export { acceptsSubmission, appendSpan, detectEnd, insertedSpan, isLexicalSendKey, isModifiedSendKey, lexicalEnterVerdict, mentionBlock, primaryRoleOf, sendButtonVerdict, sendObserved, } from './send-plan.ts';
 export type { ComposerFacts, KeyFacts, PrimaryRole, SendVerdict } from './send-plan.ts';
 export { RailRegistry } from './registry.ts';
 export type { RailRecord, RailRoute } from './registry.ts';

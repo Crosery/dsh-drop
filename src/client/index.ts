@@ -76,7 +76,7 @@ export {
 } from './composer-face.ts'
 export type { Appended, ComposerFace, ComposerParts, InputSnapshot } from './composer-face.ts'
 export {
-  acceptsSubmission, appendSpan, detectEnd, insertedSpan, isLexicalSendKey, lexicalEnterVerdict,
+  acceptsSubmission, appendSpan, detectEnd, insertedSpan, isLexicalSendKey, isModifiedSendKey, lexicalEnterVerdict,
   mentionBlock, primaryRoleOf, sendButtonVerdict, sendObserved,
 } from './send-plan.ts'
 export type { ComposerFacts, KeyFacts, PrimaryRole, SendVerdict } from './send-plan.ts'
