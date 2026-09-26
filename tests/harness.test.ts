@@ -18,7 +18,7 @@ import {
 } from '../scripts/harness-lib.mjs'
 import {
   NAME_HEADER, ROUTES,
-  classifyDiagnostics, exportedNames, inert, maskTokens, membersRead, missingMembers, moduleTableOf, strictModule,
+  classifyDiagnostics, exportedNames, inert, maskTokens, membersRead, missingMembers, moduleTableOf, onTrain, strictModule,
 } from '../scripts/smoke-lib.mjs'
 import { BATCH_ROUTE, NAME_HEADER as CONTRACT_NAME_HEADER, RESOLVE_ROUTE, STAGE_ROUTE } from '../src/contract.ts'
 
@@ -230,6 +230,21 @@ test("a bundle's reads of a renamed seed export are caught, statically and when 
   assert.equal(module.IconCloseOutline16, undefined)
   assert.deepEqual(misses, ['primitives.IconCloseOutline16'])
   assert.deepEqual(Object.keys(module).sort(), [...names].sort())
+})
+
+test("a seed installed at another version cannot vouch for a train's exports", () => {
+  const names = new Set(['Button'])
+  const at = (version: string) => ({ names, version })
+  // The pinned checkout judges itself; a cell judges only packages installed at its own version.
+  assert.equal(onTrain(at('0.1.7-rc.2'), '@deepseek-ai/dsh-client-ui-primitives', undefined).names, names)
+  assert.equal(onTrain(at('0.1.1-rc.2'), '@deepseek-ai/dsh-client-ui-primitives', '0.1.1-rc.2').names, names)
+  // dsh-client-store keeps its 0.1.7-rc.2 pin on 0.1.1-rc.2, which never published it.
+  const kept = onTrain(at('0.1.7-rc.2'), '@deepseek-ai/dsh-client-store', '0.1.1-rc.2')
+  assert.equal(kept.names, undefined)
+  assert.match(kept.why!, /installed at 0\.1\.7-rc\.2, not at 0\.1\.1-rc\.2/)
+  // Cordis follows the train under its own version numbers.
+  assert.equal(onTrain(at('4.0.4'), '@deepseek-ai/cordis', '0.1.1-rc.2').names, names)
+  assert.deepEqual(onTrain({ why: 'not installed with this harness' }, '@deepseek-ai/dsh-client-ui-dockkit', '0.1.1-rc.2'), { why: 'not installed with this harness' })
 })
 
 test('the smoke checks the routes the Host registers', () => {

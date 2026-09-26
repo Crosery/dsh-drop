@@ -18,11 +18,11 @@
 | `desktop / harness@desktop` | 否 | 在桌面应用更新 feed 当前发布的版本上跑同样四项；feed 会在 PR 打开期间变化，这个信号归定时任务负责 |
 | `invariants`（PR review） | 是 | `check` 与 `check:dist` |
 
-四项 harness 检查是 **types**（三个 TypeScript 程序加 `check-dist.mjs --bundle-only`）、**tests**、**admission**（每个 harness peer 在 node-semver 默认规则和 `includePrerelease` 下都接纳该版本；dsh ≥0.1.7 在安装和启动时强制执行后者）和 **smoke**（`scripts/smoke-boot.mjs`：在一次性 home 里用 `dsh plugin add` 安装打包插件、启动、激活、检查三条 Host 路由，并按 shell 模块表和该序列的导出评估浏览器产物）。步骤摘要会写明失败的检查项和精确版本。本地复现某一格：
+四项 harness 检查是 **types**（三个 TypeScript 程序加 `check-dist.mjs --bundle-only --train <版本>`）、**tests**、**admission**（每个 harness peer 在 node-semver 默认规则和 `includePrerelease` 下都接纳该版本；dsh ≥0.1.7 在安装和启动时强制执行后者）和 **smoke**（`scripts/smoke-boot.mjs`：在一次性 home 里用 `dsh plugin add` 安装打包插件、启动、激活、检查三条 Host 路由，并按 shell 模块表和该序列的导出评估浏览器产物）。步骤摘要会写明失败的检查项和精确版本。本地复现某一格：
 
 ~~~sh
 node scripts/harness-target.mjs floor --repoint --install   # 会改写 package.json 和 node_modules；用 git checkout + npm ci 还原
-npm run typecheck && node scripts/check-dist.mjs --bundle-only && npm test
+npm run typecheck && node scripts/check-dist.mjs --bundle-only --train 0.1.1-rc.2 && npm test
 node scripts/harness-target.mjs 0.1.1-rc.2 --admits
 git checkout -- package.json package-lock.json && node scripts/smoke-boot.mjs --dsh 0.1.1-rc.2
 ~~~

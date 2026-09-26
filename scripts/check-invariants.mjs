@@ -116,7 +116,7 @@ assert.match(release, /tarball: release-asset/, 'the release gate must smoke the
 assert.match(release, /r\.sha256 !== asset/, 'the release must refuse an asset whose bytes the gate did not smoke')
 assert.match(release, /dsh-drop\.tgz SHA256SUMS/, 'a release attaches dsh-drop.tgz and SHA256SUMS')
 assert.match(compat, /--tarball "\$TARBALL"/, 'harness-compat.yml must smoke the tarball it is given')
-for (const stage of ['smoke-boot.mjs', 'check-dist.mjs --bundle-only', '--admits', 'harness-verdict.cjs', 'desktop-bytes']) assert.ok(compat.includes(stage), 'harness-compat.yml lost ' + stage)
+for (const stage of ['smoke-boot.mjs', 'check-dist.mjs --bundle-only --train "$VERSION"', '--admits', 'harness-verdict.cjs', 'desktop-bytes']) assert.ok(compat.includes(stage), 'harness-compat.yml lost ' + stage)
 const shots = JSON.parse(read('screenshots.json'))
 assert.ok(Array.isArray(shots) && shots.length >= 1 && shots.length <= 8)
 for (const rel of shots) {

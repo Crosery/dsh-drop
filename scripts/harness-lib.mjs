@@ -8,10 +8,11 @@
  */
 
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import semver from 'semver'
+import { moduleTableOf } from './smoke-lib.mjs'
 
 /** The Web app package. The desktop app boots this same package at the same version. */
 export const HARNESS = '@deepseek-ai/dsh'
@@ -371,6 +372,39 @@ export function repointManifest(pkg, version, lock) {
     },
   })
   return { ...plan, missing: plan.missing.map((name) => ({ name, why: absence(name, version) })) }
+}
+
+/** The package whose built assets are the Web shell `dsh web` serves, on every train from 0.0.1-rc.5. */
+export const SHELL = '@deepseek-ai/dsh-web-frontend'
+
+/**
+ * The specifiers a train's Web shell answers without a graph row: the static
+ * module table in {@link SHELL}'s built assets at exactly that version, as
+ * the train was released. 0.1.0 and 0.1.1 answer seven specifiers and no
+ * `@deepseek-ai/dsh-client-store`; 0.1.5 on answer nine.
+ * @returns {{ table: string[], asset: string }}
+ */
+export function shellModuleTable(version) {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-shell-'))
+  try {
+    const packed = run(dir, 'npm', ['pack', `${SHELL}@${version}`, '--pack-destination', dir, '--no-audit', '--no-fund'], { timeout: 5 * 60_000 })
+    const tarball = readdirSync(dir).find((f) => f.endsWith('.tgz'))
+    if (!packed.ok || tarball === undefined) {
+      const gap = upstreamGap(packed)
+      if (gap === 'E404' || gap === 'ETARGET') throw new Error(`${SHELL}@${version} is not on npm (${gap}): there is no shell to read the module table from`)
+      throw new RegistryError(`npm pack ${SHELL}@${version} failed (${packed.timedOut ? 'timed out' : npmErrorCode(packed.output) ?? 'no npm error code'}): ${tail(packed.output, 3)}`)
+    }
+    const unpacked = run(dir, 'tar', ['-xzf', tarball], { timeout: 60_000 })
+    if (!unpacked.ok) throw new Error(`cannot unpack ${tarball}: ${tail(unpacked.output, 3)}`)
+    const assets = join(dir, 'package', 'dist', 'assets')
+    for (const asset of readdirSync(assets).filter((f) => f.endsWith('.js')).sort()) {
+      const table = moduleTableOf(readFileSync(join(assets, asset), 'utf8'))
+      if (table !== undefined) return { table, asset }
+    }
+    throw new Error(`no static module table in ${SHELL}@${version}'s dist/assets; this check needs to learn that shell`)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 }
 
 /** Whether `@deepseek-ai/dsh` itself resolves at a version, with nothing of ours involved. */

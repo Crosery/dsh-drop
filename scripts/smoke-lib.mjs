@@ -113,6 +113,21 @@ export function installedExports(from, name) {
 }
 
 /**
+ * Hold a seed module's installed exports to one train. A harness package
+ * (`@deepseek-ai/dsh-*`) installed at another version — a pin kept because the
+ * train never published it, or a checkout not put on that train — cannot vouch
+ * for what the train serves, so it is unchecked rather than trusted. Cordis
+ * follows the train under its own version numbers and is taken as installed.
+ * @param {{ names?: Set<string>, why?: string, version?: string }} found
+ * @param {string} name
+ * @param {string | undefined} train - the exact harness version, or none for the pinned checkout.
+ */
+export function onTrain(found, name, train) {
+  if (train === undefined || found.names === undefined || !name.startsWith('@deepseek-ai/dsh-') || found.version === train) return found
+  return { why: `installed at ${found.version}, not at ${train}, so it cannot vouch for that train` }
+}
+
+/**
  * Every harness seed member a bundle reads that the train does not export.
  * @param {string} source - the CommonJS client bundle.
  * @param {(name: string) => { names?: Set<string>, why?: string }} exportsOf

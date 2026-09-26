@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import vm from 'node:vm'
 import { fileURLToPath } from 'node:url'
-import { SEED_MODULES, inert, installedExports, missingMembers, strictModule } from './smoke-lib.mjs'
+import { SEED_MODULES, inert, installedExports, missingMembers, onTrain, strictModule } from './smoke-lib.mjs'
 process.chdir(fileURLToPath(new URL('..', import.meta.url)))
 
 const args = process.argv.slice(2)
@@ -13,21 +13,40 @@ const args = process.argv.slice(2)
 const bundleOnly = args.includes('--bundle-only')
 /** Another bundle to judge, e.g. an old release's `lib/client.js`. */
 const bundlePath = args.includes('--bundle') ? args[args.indexOf('--bundle') + 1] : 'lib/client.js'
+/**
+ * The exact harness version node_modules was put on (a CI cell, a sweep row).
+ * The bundle is then judged by that train's own shell and packages: the
+ * module table its `dsh-web-frontend` serves, and only seeds installed at that
+ * version. Without it, the pinned checkout is judged by the pinned table.
+ */
+const train = args.includes('--train') ? args[args.indexOf('--train') + 1] : undefined
+if (args.includes('--train') && !/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(train ?? '')) throw new Error(`--train needs an exact harness version, not ${JSON.stringify(train)}`)
+
+/** The pinned train's module table, less the dockkit this plugin never requires. */
+const PINNED_TABLE = ['react', 'react/jsx-runtime', 'react-dom', 'react-dom/client', '@deepseek-ai/cordis', '@deepseek-ai/dsh-client-store', '@deepseek-ai/dsh-client-ui-slots', '@deepseek-ai/dsh-client-ui-primitives']
 
 /**
  * Judge one client bundle against the loader's module table and the installed
  * seed modules' export names.
  * @param {string} path
  */
-function checkBundle(path) {
-  const allowed = new Set(['react', 'react/jsx-runtime', 'react-dom', 'react-dom/client', '@deepseek-ai/cordis', '@deepseek-ai/dsh-client-store', '@deepseek-ai/dsh-client-ui-slots', '@deepseek-ai/dsh-client-ui-primitives'])
+async function checkBundle(path) {
+  let shell = 'the pinned module table'
+  let table = PINNED_TABLE
+  if (train !== undefined) {
+    const { shellModuleTable, SHELL } = await import('./harness-lib.mjs')
+    const found = shellModuleTable(train)
+    table = found.table
+    shell = `the ${table.length}-specifier module table of ${SHELL.replace('@deepseek-ai/', '')}@${train} (${found.asset})`
+  }
+  const allowed = new Set(table)
   const bundle = readFileSync(path, 'utf8')
-  for (const m of bundle.matchAll(/require\(["']([^"']+)["']\)/g)) assert.ok(allowed.has(m[1]), 'foreign browser require: ' + m[1])
+  for (const m of bundle.matchAll(/require\(["']([^"']+)["']\)/g)) assert.ok(allowed.has(m[1]), `foreign browser require: ${m[1]} is not in ${shell}`)
   assert.ok(!/\bnode:/.test(bundle), 'Node builtin in browser')
 
-  const exportsOf = (name) => installedExports(join(process.cwd(), 'package.json'), name)
+  const exportsOf = (name) => onTrain(installedExports(join(process.cwd(), 'package.json'), name), name, train)
   const members = missingMembers(bundle, exportsOf)
-  assert.deepEqual(members.unchecked, [], `the bundle reads seed modules whose exports cannot be read here; add them as devDependencies: ${members.unchecked.join(', ')}`)
+  assert.deepEqual(members.unchecked, [], `the bundle reads seed modules whose exports cannot be read${train === undefined ? '' : ` for ${train}`}: ${members.unchecked.join(', ')} — install them at that train (a devDependency the repoint moves), or stop reading them`)
   assert.deepEqual(members.missing, {}, `the bundle reads members this train does not export: ${JSON.stringify(members.missing)}`)
 
   const seeds = new Map(SEED_MODULES.map(([, name]) => [name, exportsOf(name)]))
@@ -46,7 +65,7 @@ function checkBundle(path) {
   assert.deepEqual(misses, [], `the factory read members this train does not export: ${misses.join(', ')}`)
   assert.equal(typeof loaded.apply, 'function')
   const versions = [...seeds].filter(([, s]) => s.version !== undefined).map(([n, s]) => `${n.replace('@deepseek-ai/', '')}@${s.version}`)
-  console.log(`Distribution OK: ${path} requires only module-table specifiers and reads ${members.checked.length === 0 ? 'no seed member' : `only exported members of ${members.checked.join(', ')}`} (${versions.join(', ')})`)
+  console.log(`Distribution OK: ${path} requires only specifiers in ${shell} and reads ${members.checked.length === 0 ? 'no seed member' : `only exported members of ${members.checked.join(', ')}`} (${versions.join(', ')})`)
 }
 
 // 1. The committed dist is exactly what src/ builds.
@@ -106,9 +125,10 @@ if (scratch !== undefined) try {
 // first card rendered `undefined`. Member reads are lazy (`import_x.Name`
 // inside components), so the static scan is what catches them; the factory
 // run additionally answers every seed module with only its real names. "The
-// train" is whatever node_modules holds: the pinned devDependencies here, a
-// repointed install in a harness cell (`--bundle-only`).
-checkBundle(bundlePath)
+// train" is the pinned devDependencies here; a harness cell or sweep row names
+// its version (`--bundle-only --train <version>`), and is judged by that
+// train's own shell table and by seeds installed at exactly that version.
+await checkBundle(bundlePath)
 if (bundleOnly) process.exit(0)
 
 const folder = mkdtempSync(join(tmpdir(),'dsh-drop-pack-'))

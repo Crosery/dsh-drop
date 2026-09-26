@@ -27,7 +27,7 @@ Host peer 对每个支持的元组各用一个带预发布标记的比较器：`
 
 每格跑四项：
 
-- **types**：Host、客户端、测试三个程序对该序列声明做类型检查，再跑 `check-dist.mjs --bundle-only`——客户端产物读取的每个 harness 模块成员都必须是该序列真实导出的；
+- **types**：Host、客户端、测试三个程序对该序列声明做类型检查，再跑 `check-dist.mjs --bundle-only --train <版本>`——客户端产物只能 require 该序列自己的 shell 应答的模块说明符（该版本 `@deepseek-ai/dsh-web-frontend` 中的模块表：0.1.0 与 0.1.1 只有七个，没有 `dsh-client-store`），读取的每个 harness 模块成员都必须由恰好装在该版本的包导出；该序列从未发布、沿用本仓库 pin 的包不能为它作证；
 - **tests**：测试套件对该序列的包运行；
 - **admission**：每个 harness peer 在两种 semver 规则下都接纳该版本；
 - **smoke**：`scripts/smoke-boot.mjs`——打包当前 checkout，把精确版本的 `@deepseek-ai/dsh` 装进系统临时目录下的一次性 `DSH_HOME`，用 `dsh plugin add` 添加 tarball（不加豁免），启动 `dsh --profile web`，并要求：没有指向本插件的 "skipping profile bundle" 或 "did not activate"；三条路由已挂载，在具备 `connection.requestRejection` 的 harness（0.1.2 起）上无登录 cookie 时返回 401、带 cookie 时可用——实际暂存一个文件到该 home 并解析成功；插件及其 `dsh.client.inject` 目标出现在 `__DSH_BOOT__` 中；服务端提供的产物能按 shell 自己的模块表求值；产物读取的每个 harness 成员都存在于该序列已安装的包里。扫描行默认只对每个元组的最新构建以及各命名格解析出的版本做冒烟（`smoke: heads`），也可按需全做。

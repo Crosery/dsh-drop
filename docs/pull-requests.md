@@ -18,11 +18,11 @@ Required gates: separate typechecks, tests, build, client module-table purity an
 | `desktop / harness@desktop` | no | the same on the version the desktop app's update feeds ship today; the feed moves under open PRs, so the scheduled run owns that signal |
 | `invariants` (PR review) | yes | `check` and `check:dist` |
 
-The four harness stages are **types** (all three programs plus `check-dist.mjs --bundle-only`), **tests**, **admission** (every harness peer admits the version under node-semver's default rule and under `includePrerelease`, which dsh ≥0.1.7 enforces at install and boot) and **smoke** (`scripts/smoke-boot.mjs`: `dsh plugin add` of the packed plugin in a throwaway home, boot, activation, the three Host routes, the served bundle against the shell's module table and the train's exports). The step summary names the failing stage and the exact versions. To reproduce a cell locally:
+The four harness stages are **types** (all three programs plus `check-dist.mjs --bundle-only --train <version>`), **tests**, **admission** (every harness peer admits the version under node-semver's default rule and under `includePrerelease`, which dsh ≥0.1.7 enforces at install and boot) and **smoke** (`scripts/smoke-boot.mjs`: `dsh plugin add` of the packed plugin in a throwaway home, boot, activation, the three Host routes, the served bundle against the shell's module table and the train's exports). The step summary names the failing stage and the exact versions. To reproduce a cell locally:
 
 ~~~sh
 node scripts/harness-target.mjs floor --repoint --install   # rewrites package.json and node_modules; restore with git checkout + npm ci
-npm run typecheck && node scripts/check-dist.mjs --bundle-only && npm test
+npm run typecheck && node scripts/check-dist.mjs --bundle-only --train 0.1.1-rc.2 && npm test
 node scripts/harness-target.mjs 0.1.1-rc.2 --admits
 git checkout -- package.json package-lock.json && node scripts/smoke-boot.mjs --dsh 0.1.1-rc.2
 ~~~

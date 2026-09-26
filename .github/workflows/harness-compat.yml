@@ -3,9 +3,10 @@
 # One question per cell, four stages per cell:
 #
 #   types      all three typechecks (Host, client, tests) against that train's
-#              published .d.ts, and the client bundle's reads of harness seed
-#              modules against the export names that train really publishes
-#              (check-dist.mjs --bundle-only)
+#              published .d.ts, and the client bundle against that train's own
+#              shell: only specifiers its dsh-web-frontend module table answers,
+#              and only seed members its packages export (check-dist.mjs
+#              --bundle-only --train <version>)
 #   tests      the plugin's own tests against that train's packages
 #   admission  the peer ranges admit the version under BOTH semver rules — the
 #              prerelease-inclusive one dsh >= 0.1.7 applies at install and at
@@ -227,9 +228,11 @@ jobs:
         if: steps.target.outputs.incomplete != 'true' && steps.install.outputs.incomplete != 'true'
         continue-on-error: true
         timeout-minutes: 10
+        env:
+          VERSION: ${{ steps.target.outputs.version }}
         run: |
           npm run typecheck
-          node scripts/check-dist.mjs --bundle-only
+          node scripts/check-dist.mjs --bundle-only --train "$VERSION"
 
       - name: Test
         id: tests

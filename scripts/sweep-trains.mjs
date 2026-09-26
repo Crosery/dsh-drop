@@ -12,8 +12,8 @@
  * devDependency stays at its package-lock.json version, and a peer graph
  * that hits ERESOLVE is reinstalled in legacy peer mode with the train's own
  * harness peers) — and then runs `npm run typecheck` (all three programs), the
- * bundle's seed-member check against that train's exports
- * (`check-dist.mjs --bundle-only`) and `npm test`.
+ * bundle check against that train's own shell table and exports
+ * (`check-dist.mjs --bundle-only --train <version>`) and `npm test`.
  *
  * Each row also records whether the peer ranges admit the train under both
  * node-semver rules (default, and `includePrerelease` as dsh ≥0.1.7 enforces
@@ -124,7 +124,7 @@ async function sweep(version) {
   const typecheck = await exec(dir, 'npm', ['run', 'typecheck'])
   row.typecheck = typecheck.ok ? 'pass' : 'FAIL'
   if (!typecheck.ok) row.note = [row.note, (typecheck.out.split('\n').find((line) => /error TS/.test(line)) ?? '').trim().slice(0, 200)].filter(Boolean).join('; ')
-  const bundle = await exec(dir, process.execPath, ['scripts/check-dist.mjs', '--bundle-only'])
+  const bundle = await exec(dir, process.execPath, ['scripts/check-dist.mjs', '--bundle-only', '--train', version])
   row.bundle = bundle.ok ? 'pass' : 'FAIL'
   if (!bundle.ok) row.note = [row.note, (/AssertionError[^\n]*/.exec(bundle.out)?.[0] ?? 'bundle check failed').slice(0, 200)].filter(Boolean).join('; ')
   const test = await exec(dir, 'npm', ['test'])

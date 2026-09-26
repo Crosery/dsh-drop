@@ -2,14 +2,16 @@
  * The CI scripts against registries that fail: none of npm's silences may
  * pass as a fact about a train. Each case points npm at a local stand-in —
  * a closed port, a server that answers 404 or 500, one that never answers,
- * or one that lists a single harness version — and runs the real scripts in
+ * one that lists a single harness version, or one that serves a Web shell —
+ * and runs the real scripts in
  * a child process (npm is driven synchronously, so the stand-in must keep
  * this process's event loop free). `harness-target.mjs` runs in a scratch
  * copy, so no case can rewrite this checkout's manifest.
  */
 
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
@@ -27,9 +29,17 @@ writeFileSync(userconfig, '')
 /** A closed port: every request is refused at once. */
 const CLOSED = 'http://127.0.0.1:9/'
 
-type Mode = 'not-found' | 'fault' | 'silent' | 'one-train'
+type Mode = 'not-found' | 'fault' | 'silent' | 'one-train' | 'shell'
 const servers: Server[] = []
 const registries = {} as Record<Mode, string>
+
+/**
+ * A Web shell at a version no cell ever installs, whose loader table is
+ * 0.1.1's: seven specifiers, no `dsh-client-store`.
+ */
+const SHELL_TRAIN = '0.0.0-shell.1'
+const SHELL_TABLE = 'function Jd(){return{react:a,"react/jsx-runtime":b,"react-dom":c,"react-dom/client":d,"@deepseek-ai/cordis":e,"@deepseek-ai/dsh-client-ui-slots":f,"@deepseek-ai/dsh-client-ui-primitives":g}}'
+let shellTarball: Buffer
 
 /**
  * Serve `mode`: 404 for everything, 500 for everything, never answer, or one
@@ -41,6 +51,17 @@ async function standIn(mode: Mode) {
     if (mode === 'silent') return
     if (mode === 'fault') { res.statusCode = 500; res.end('{"error":"boom"}'); return }
     const name = decodeURIComponent(req.url ?? '').slice(1)
+    if (mode === 'shell' && name === 'shell.tgz') { res.end(shellTarball); return }
+    if (mode === 'shell' && name === '@deepseek-ai/dsh-web-frontend') {
+      const dist = {
+        tarball: `http://${req.headers.host}/shell.tgz`,
+        integrity: `sha512-${createHash('sha512').update(shellTarball).digest('base64')}`,
+        shasum: createHash('sha1').update(shellTarball).digest('hex'),
+      }
+      res.setHeader('content-type', 'application/json')
+      res.end(JSON.stringify({ name, 'dist-tags': { latest: SHELL_TRAIN }, versions: { [SHELL_TRAIN]: { name, version: SHELL_TRAIN, dist } } }))
+      return
+    }
     if (mode === 'one-train' && (name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-')) && name !== '@deepseek-ai/dsh-client-runtime') {
       const version = '0.1.7-rc.2'
       const dependencies = name === '@deepseek-ai/dsh' ? { '@deepseek-ai/cordis': '4.0.4' } : {}
@@ -61,7 +82,14 @@ async function standIn(mode: Mode) {
 }
 
 before(async () => {
-  for (const mode of ['not-found', 'fault', 'silent', 'one-train'] as const) registries[mode] = await standIn(mode)
+  const shell = join(scratch, 'shell', 'package')
+  mkdirSync(join(shell, 'dist', 'assets'), { recursive: true })
+  writeFileSync(join(shell, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh-web-frontend', version: SHELL_TRAIN }))
+  writeFileSync(join(shell, 'dist', 'assets', 'vendor-a.js'), 'var react={};')
+  writeFileSync(join(shell, 'dist', 'assets', 'index-b.js'), `var x=1;${SHELL_TABLE}`)
+  execFileSync('tar', ['-czf', join(scratch, 'shell.tgz'), '-C', join(scratch, 'shell'), 'package'])
+  shellTarball = readFileSync(join(scratch, 'shell.tgz'))
+  for (const mode of ['not-found', 'fault', 'silent', 'one-train', 'shell'] as const) registries[mode] = await standIn(mode)
 })
 after(() => {
   for (const server of servers) server.closeAllConnections()
@@ -205,4 +233,35 @@ test('the boot smoke gives up on a registry that never answers', async () => {
   assert.equal(smoke.code, 1, smoke.stdout + smoke.stderr)
   assert.match(smoke.stdout, /FAILED {2}smoke — npm view @deepseek-ai\/dsh time --json timed out/)
   assert.match(smoke.stdout, /boot smoke: @crosery\/dsh-drop@\S+ on dsh \? — failed/)
+})
+
+test("a cell judges the bundle by its own train's shell table and packages", async () => {
+  const bundle = (name: string, body: string) => {
+    const path = join(scratch, name)
+    writeFileSync(path, `window.__ModuleLoader__.load({ id: '@crosery/dsh-drop', factory: (require) => { ${body}; return { apply() {} } } })`)
+    return path
+  }
+  const dist = (registry: string, ...argv: string[]) => exec(registry, root, ['scripts/check-dist.mjs', '--bundle-only', ...argv])
+
+  const own = await dist(registries.shell, '--train', SHELL_TRAIN)
+  assert.equal(own.code, 0, own.stdout + own.stderr)
+  assert.match(own.stdout, new RegExp(`7-specifier module table of dsh-web-frontend@${SHELL_TRAIN.replace(/\./g, '\\.')} \\(index-b\\.js\\)`))
+
+  // 0.1.0 and 0.1.1 serve no dsh-client-store: the pinned table would pass this bundle there.
+  const store = bundle('store.js', 'require("@deepseek-ai/dsh-client-store")')
+  assert.equal((await dist(registries.shell, '--bundle', store)).code, 0, 'the pinned table answers dsh-client-store')
+  const refused = await dist(registries.shell, '--bundle', store, '--train', SHELL_TRAIN)
+  assert.equal(refused.code, 1, refused.stdout + refused.stderr)
+  assert.match(refused.stderr, /foreign browser require: @deepseek-ai\/dsh-client-store is not in the 7-specifier module table/)
+
+  // A seed installed at another version cannot vouch for this train's exports.
+  const reads = bundle('reads.js', 'var import_dsh_client_ui_primitives = require("@deepseek-ai/dsh-client-ui-primitives"); import_dsh_client_ui_primitives.Button')
+  const unvouched = await dist(registries.shell, '--bundle', reads, '--train', SHELL_TRAIN)
+  assert.equal(unvouched.code, 1, unvouched.stdout + unvouched.stderr)
+  assert.match(unvouched.stderr, new RegExp(`dsh-client-ui-primitives \\(installed at \\S+, not at ${SHELL_TRAIN.replace(/\./g, '\\.')}`))
+
+  // No shell, no pass: a registry that does not answer fails the check.
+  const closed = await dist(CLOSED, '--train', SHELL_TRAIN)
+  assert.equal(closed.code, 1, closed.stdout + closed.stderr)
+  assert.match(closed.stderr, /RegistryError|ECONNREFUSED/)
 })
