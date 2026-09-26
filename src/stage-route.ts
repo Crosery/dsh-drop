@@ -25,7 +25,7 @@ import { pipeline } from 'node:stream/promises'
 import { Transform } from 'node:stream'
 import {
   BATCH_HEADER, NAME_HEADER, safeStageName, stageCandidate, stageDayDir,
-  type StageErr, type StageOk,
+  type NameRules, type StageErr, type StageOk,
 } from './contract.ts'
 
 /** Thrown by the counting transform when the body exceeds the ceiling. */
@@ -138,6 +138,8 @@ export interface StageOptions {
   reject?: RequestRejection | undefined
   /** Folder batches; a request naming one is handed there. */
   batches?: BatchReceiver | undefined
+  /** Apply the Windows name rules; the running platform by default. */
+  win32?: boolean | undefined
 }
 
 /**
@@ -169,16 +171,17 @@ function json(res: ServerResponse, status: number, body: StageOk | StageErr): vo
  * header values are not. A malformed encoding is not worth refusing over — the
  * sanitizer's fallback name is a better outcome than a failed drop.
  * @param req - the request.
+ * @param rules - the Host platform's name rules.
  * @returns a single safe path segment.
  */
-export function requestedName(req: IncomingMessage): string {
+export function requestedName(req: IncomingMessage, rules: NameRules = {}): string {
   const raw = req.headers[NAME_HEADER]
   const value = Array.isArray(raw) ? raw[0] : raw
-  if (value === undefined) return safeStageName('')
+  if (value === undefined) return safeStageName('', rules)
   try {
-    return safeStageName(decodeURIComponent(value))
+    return safeStageName(decodeURIComponent(value), rules)
   } catch {
-    return safeStageName(value)
+    return safeStageName(value, rules)
   }
 }
 
@@ -219,6 +222,7 @@ export function insideRoot(root: string, target: string): boolean {
  */
 export function stageHandler(opts: StageOptions): (req: IncomingMessage, res: ServerResponse) => Promise<void> {
   const clock = opts.now ?? Date.now
+  const win32 = opts.win32 ?? process.platform === 'win32'
 
   return async (req, res) => {
     // Authentication first: an unauthenticated caller learns nothing, not
@@ -252,7 +256,7 @@ export function stageHandler(opts: StageOptions): (req: IncomingMessage, res: Se
 
     const root = opts.root()
     const dir = join(root, stageDayDir(clock()))
-    const name = requestedName(req)
+    const name = requestedName(req, { win32 })
     const limit = opts.maxBytes()
 
     let temp: string | undefined

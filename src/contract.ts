@@ -530,16 +530,21 @@ const FALLBACK_NAME = 'dropped-file'
  * are not a filesystem problem but an `@` mention problem, since
  * `formatFileMention()` upstream refuses to represent them, so a file named
  * with one could never be referenced afterward. Length is the third: a browser
- * will happily hand over a 4 KB name that no filesystem accepts.
+ * will happily hand over a 4 KB name that no filesystem accepts. On a Windows
+ * Host its name rules apply as well ({@link NameRules}): a name the browser's
+ * platform allows, such as `Q3: plan.txt`, would otherwise upload in full and
+ * then fail to publish.
  * @param raw - the browser-declared file name.
+ * @param rules - the Host platform's name rules.
  * @returns a single path segment safe to join onto the staging root.
  */
-export function safeStageName(raw: string): string {
+export function safeStageName(raw: string, rules: NameRules = {}): string {
   const segment = raw.split(/[\\/]/).pop() ?? ''
   // Control characters and double quotes are stripped rather than escaped:
   // `formatFileMention()` upstream refuses to represent either, so a staged
   // name containing one could never be written as an `@` reference.
-  const cleaned = segment.replace(/[\u0000-\u001F\u007F-\u009F"]/g, '').trim()
+  let cleaned = segment.replace(/[\u0000-\u001F\u007F-\u009F"]/g, '').trim()
+  if (rules.win32 === true) cleaned = win32Segment(cleaned)
   if (cleaned === '' || /^\.+$/.test(cleaned)) return FALLBACK_NAME
   return fitSegment(cleaned) || FALLBACK_NAME
 }
@@ -588,12 +593,29 @@ const WIN32_FORBIDDEN = /[<>:"|?*]/g
 /** Device names Windows reserves in every directory, with or without an extension. */
 const WIN32_RESERVED = /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(\..*)?$/i
 
+/** Which platform's name rules a published name follows. */
+export interface NameRules {
+  /** Apply the Windows name rules as well; the Host decides, by its own platform. */
+  win32?: boolean | undefined
+}
+
+/**
+ * Apply the Windows name rules to one cleaned segment: reserved characters
+ * replaced, trailing dots and spaces dropped (Windows drops them itself, so
+ * the published name would differ from the one answered), device names
+ * prefixed.
+ * @param segment - a segment already free of separators and controls.
+ * @returns the segment as Windows can create it; empty when nothing is left.
+ */
+function win32Segment(segment: string): string {
+  const cleaned = segment.replace(WIN32_FORBIDDEN, '_').replace(/[. ]+$/, '')
+  return WIN32_RESERVED.test(cleaned) ? `_${cleaned}` : cleaned
+}
+
 /** Options of {@link safeRelativeSegments}. */
-export interface RelativePathRules {
+export interface RelativePathRules extends NameRules {
   /** Most segments the path may have. */
   maxDepth: number
-  /** Apply the Windows name rules as well. */
-  win32?: boolean | undefined
 }
 
 /**
@@ -630,10 +652,7 @@ export function safeRelativeSegments(raw: string, rules: RelativePathRules): str
   for (const part of parts) {
     if (part === '.' || part === '..') return undefined
     let cleaned = part.replace(/[\u0000-\u001F\u007F-\u009F]/g, '')
-    if (rules.win32 === true) {
-      cleaned = cleaned.replace(WIN32_FORBIDDEN, '_').replace(/[. ]+$/, '')
-      if (WIN32_RESERVED.test(cleaned)) cleaned = `_${cleaned}`
-    }
+    if (rules.win32 === true) cleaned = win32Segment(cleaned)
     // Stripping can expose a dot segment (`.\u0001.`); it is refused like one.
     if (cleaned === '' || cleaned === '.' || cleaned === '..') return undefined
     const fitted = fitSegment(cleaned)
@@ -649,15 +668,21 @@ export function safeRelativeSegments(raw: string, rules: RelativePathRules): str
  * The name a copied folder is published under.
  *
  * The folder's own name is the one segment that becomes part of a mention,
- * so it follows the single-file rules — quotes and controls stripped.
+ * so it follows the single-file rules — quotes and controls stripped, and on
+ * a Windows Host that platform's name rules. Decided when the batch begins:
+ * a name Windows refuses (`Q3: plan`) would otherwise upload in full and fail
+ * only at commit.
  * @param raw - the dropped folder's name.
+ * @param rules - the Host platform's name rules.
  * @returns a single safe segment.
  */
-export function safeFolderName(raw: string): string {
+export function safeFolderName(raw: string, rules: NameRules = {}): string {
   const segment = raw.split(/[\\/]/).filter((part) => part !== '').pop() ?? ''
   const cleaned = segment.replace(/[\u0000-\u001F\u007F-\u009F"]/g, '').trim()
   if (cleaned === '' || /^\.+$/.test(cleaned)) return FALLBACK_FOLDER_NAME
-  return fitBytes(cleaned, MAX_BASE_LENGTH) || FALLBACK_FOLDER_NAME
+  // After the cut: a cut can end the name on a dot or a space again.
+  const fitted = fitBytes(cleaned, MAX_BASE_LENGTH)
+  return (rules.win32 === true ? win32Segment(fitted) : fitted) || FALLBACK_FOLDER_NAME
 }
 
 /** Fallback when the dropped folder's name carries nothing usable. */

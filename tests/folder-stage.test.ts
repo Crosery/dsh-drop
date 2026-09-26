@@ -15,8 +15,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { AddressInfo } from 'node:net'
 import {
-  BATCH_HEADER, DEFAULT_FOLDER_IGNORE, RELPATH_HEADER,
-  type BatchBeginOk, type BatchCommitOk, type FolderLimits, type StageErr,
+  BATCH_HEADER, DEFAULT_FOLDER_IGNORE, NAME_HEADER, RELPATH_HEADER,
+  type BatchBeginOk, type BatchCommitOk, type FolderLimits, type StageErr, type StageOk,
 } from '../src/contract.ts'
 import { stageHandler } from '../src/stage-route.ts'
 import { batchStore, publishDirectory, type BatchStore } from '../src/folder-stage.ts'
@@ -309,6 +309,44 @@ describe('folder batch', () => {
     assert.equal((await control({ op: 'commit' })).status, 400)
     const get = await fetch(`${origin}/batch`)
     assert.equal(get.status, 405)
+  })
+})
+
+describe('Windows name rules on a Windows Host', () => {
+  it('publishes a folder and a file under names Windows can create, decided before the bytes arrive', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-drop-win32-'))
+    const limits: FolderLimits = {
+      maxFiles: 10, maxBytes: 1000, maxFileBytes: 500, maxDepth: 4, ignore: DEFAULT_FOLDER_IGNORE,
+    }
+    const now = (): number => Date.UTC(2026, 7, 31)
+    const store = batchStore({ root: () => root, limits: () => limits, now, win32: true })
+    const stage = stageHandler({ root: () => root, maxBytes: () => 500, now, batches: store, win32: true })
+    const local = createServer((req, res) => { void (req.url === '/batch' ? store.handler(req, res) : stage(req, res)) })
+    await new Promise<void>((done) => local.listen(0, '127.0.0.1', done))
+    const origin = `http://127.0.0.1:${(local.address() as AddressInfo).port}`
+    try {
+      const control = (body: unknown) => fetch(`${origin}/batch`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+      })
+      const { id } = await (await control({ op: 'begin', name: 'Q3: plan' })).json() as BatchBeginOk
+      const put = await fetch(`${origin}/stage`, {
+        method: 'POST', headers: { [BATCH_HEADER]: id, [RELPATH_HEADER]: encodeURIComponent('notes.md') }, body: 'x',
+      })
+      assert.equal(put.status, 200)
+      const committed = await control({ op: 'commit', id })
+      assert.equal(committed.status, 200)
+      assert.equal(((await committed.json()) as BatchCommitOk).path, join(root, DAY, 'Q3_ plan'))
+
+      const single = await fetch(`${origin}/stage`, {
+        method: 'POST', headers: { [NAME_HEADER]: encodeURIComponent('aux: log.txt') }, body: 'y',
+      })
+      assert.equal(single.status, 200)
+      assert.equal(((await single.json()) as StageOk).path, join(root, DAY, 'aux_ log.txt'))
+    } finally {
+      await store.dispose()
+      await new Promise<void>((done) => local.close(() => done()))
+      await rm(root, { recursive: true, force: true })
+    }
   })
 })
 

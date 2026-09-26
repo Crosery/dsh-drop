@@ -248,7 +248,7 @@ export function batchStore(opts: BatchOptions): BatchStore {
     const home = join(dayDir, `.batch-${id}`)
     const batch: Batch = {
       id,
-      name: safeFolderName(name),
+      name: safeFolderName(name, { win32 }),
       dayDir,
       home,
       tree: join(home, 'tree'),

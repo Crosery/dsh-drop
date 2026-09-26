@@ -67,7 +67,8 @@ export {
 } from './contract.ts'
 export type {
   BatchAbortOk, BatchBeginOk, BatchCommitOk, BatchFileOk, BatchLimitsOk, BatchRequest, DropSettings,
-  FolderLimit, FolderLimits, FolderSampleEntry, FolderSummary, ResolveOk, ResolveRequest, StageErr, StageOk,
+  FolderLimit, FolderLimits, FolderSampleEntry, FolderSummary, NameRules, ResolveOk, ResolveRequest, StageErr,
+  StageOk,
 } from './contract.ts'
 export { DropSettingsSchema } from './settings.ts'
 export {

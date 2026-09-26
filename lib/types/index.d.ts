@@ -40,7 +40,7 @@ import type { Context } from '@deepseek-ai/cordis';
 import { type DropSettings } from './contract.ts';
 import { type RequestRejection } from './stage-route.ts';
 export { BATCH_HEADER, BATCH_ROUTE, COMPOSER_IMAGE_MEDIA_TYPES, DEFAULT_FOLDER_IGNORE, DEFAULT_FOLDER_MAX_BYTES, DEFAULT_FOLDER_MAX_DEPTH, DEFAULT_FOLDER_MAX_FILES, DROP_SETTINGS_NAMESPACE, FOLDER_SAMPLE_SIZE, MTIME_TOLERANCE_MS, RELPATH_HEADER, RESOLVE_ROUTE, STAGE_DIR, STAGE_ROUTE, fileNameOf, folderCandidate, folderLimitsOf, isComposerImageType, isIgnoredName, isPrunableStageDir, mentionFor, pathFromFileUrl, safeFolderName, safeRelativeSegments, safeStageName, stageCandidate, stageDayDir, uriListPaths, } from './contract.ts';
-export type { BatchAbortOk, BatchBeginOk, BatchCommitOk, BatchFileOk, BatchLimitsOk, BatchRequest, DropSettings, FolderLimit, FolderLimits, FolderSampleEntry, FolderSummary, ResolveOk, ResolveRequest, StageErr, StageOk, } from './contract.ts';
+export type { BatchAbortOk, BatchBeginOk, BatchCommitOk, BatchFileOk, BatchLimitsOk, BatchRequest, DropSettings, FolderLimit, FolderLimits, FolderSampleEntry, FolderSummary, NameRules, ResolveOk, ResolveRequest, StageErr, StageOk, } from './contract.ts';
 export { DropSettingsSchema } from './settings.ts';
 export { crossSite, declaresJson, insideRoot, refused, requestedName, publishStage, sendJson, stageHandler, } from './stage-route.ts';
 export type { BatchReceiver, RequestRejection, StageOptions } from './stage-route.ts';

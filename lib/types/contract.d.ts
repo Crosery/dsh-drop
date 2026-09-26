@@ -393,19 +393,26 @@ export declare function uriListPaths(text: string): string[];
  * are not a filesystem problem but an `@` mention problem, since
  * `formatFileMention()` upstream refuses to represent them, so a file named
  * with one could never be referenced afterward. Length is the third: a browser
- * will happily hand over a 4 KB name that no filesystem accepts.
+ * will happily hand over a 4 KB name that no filesystem accepts. On a Windows
+ * Host its name rules apply as well ({@link NameRules}): a name the browser's
+ * platform allows, such as `Q3: plan.txt`, would otherwise upload in full and
+ * then fail to publish.
  * @param raw - the browser-declared file name.
+ * @param rules - the Host platform's name rules.
  * @returns a single path segment safe to join onto the staging root.
  */
-export declare function safeStageName(raw: string): string;
+export declare function safeStageName(raw: string, rules?: NameRules): string;
 /** Longest relative path a folder copy writes, in UTF-8 bytes. */
 export declare const MAX_RELATIVE_PATH_BYTES = 1024;
+/** Which platform's name rules a published name follows. */
+export interface NameRules {
+    /** Apply the Windows name rules as well; the Host decides, by its own platform. */
+    win32?: boolean | undefined;
+}
 /** Options of {@link safeRelativeSegments}. */
-export interface RelativePathRules {
+export interface RelativePathRules extends NameRules {
     /** Most segments the path may have. */
     maxDepth: number;
-    /** Apply the Windows name rules as well. */
-    win32?: boolean | undefined;
 }
 /**
  * Reduce a browser-supplied path inside a dropped folder to segments safe to
@@ -439,11 +446,15 @@ export declare function safeRelativeSegments(raw: string, rules: RelativePathRul
  * The name a copied folder is published under.
  *
  * The folder's own name is the one segment that becomes part of a mention,
- * so it follows the single-file rules — quotes and controls stripped.
+ * so it follows the single-file rules — quotes and controls stripped, and on
+ * a Windows Host that platform's name rules. Decided when the batch begins:
+ * a name Windows refuses (`Q3: plan`) would otherwise upload in full and fail
+ * only at commit.
  * @param raw - the dropped folder's name.
+ * @param rules - the Host platform's name rules.
  * @returns a single safe segment.
  */
-export declare function safeFolderName(raw: string): string;
+export declare function safeFolderName(raw: string, rules?: NameRules): string;
 /**
  * The nth candidate name for one published folder.
  *

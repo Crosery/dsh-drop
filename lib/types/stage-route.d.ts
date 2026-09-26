@@ -16,6 +16,7 @@
  * @module @crosery/dsh-drop/stage-route
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { type NameRules } from './contract.ts';
 /**
  * The Host's own admission check for a raw Web route, when it has one.
  *
@@ -80,6 +81,8 @@ export interface StageOptions {
     reject?: RequestRejection | undefined;
     /** Folder batches; a request naming one is handed there. */
     batches?: BatchReceiver | undefined;
+    /** Apply the Windows name rules; the running platform by default. */
+    win32?: boolean | undefined;
 }
 /**
  * Answer with a JSON body and no cache.
@@ -95,9 +98,10 @@ export declare function sendJson(res: ServerResponse, status: number, body: obje
  * header values are not. A malformed encoding is not worth refusing over — the
  * sanitizer's fallback name is a better outcome than a failed drop.
  * @param req - the request.
+ * @param rules - the Host platform's name rules.
  * @returns a single safe path segment.
  */
-export declare function requestedName(req: IncomingMessage): string;
+export declare function requestedName(req: IncomingMessage, rules?: NameRules): string;
 /** Publish complete bytes atomically; link refuses an existing target. */
 export declare function publishStage(temp: string, dir: string, name: string): Promise<string>;
 /**
