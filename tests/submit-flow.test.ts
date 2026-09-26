@@ -117,8 +117,18 @@ after(() => {
   }
 })
 
-/** A dispatched event: capture listener first, then the composer's own handler unless stopped. */
-function dispatch(type: string, target: FakeElement, props: Record<string, unknown>, bubble?: () => void): boolean {
+/**
+ * A dispatched event: capture listener first, then the composer's own handler
+ * unless propagation was stopped. The handler learns whether the default was
+ * prevented, which is all that stands between an unhandled Enter and the
+ * browser typing a line break.
+ */
+function dispatch(
+  type: string,
+  target: FakeElement,
+  props: Record<string, unknown>,
+  bubble?: (prevented: boolean) => void,
+): boolean {
   let prevented = false
   let stopped = false
   const event = {
@@ -132,7 +142,7 @@ function dispatch(type: string, target: FakeElement, props: Record<string, unkno
     ...props,
   }
   listeners.get(type)?.(event)
-  if (!stopped && !prevented) bubble?.()
+  if (!stopped) bubble?.(prevented)
   return prevented
 }
 
@@ -277,6 +287,59 @@ describe('Lexical composer (0.1.2 onward)', () => {
       assert.equal(composer.text, 'hello', 'nothing was appended')
       await tick()
       assert.equal(guard.staged().length, 1)
+    } finally { guard.release() }
+  })
+
+  const modified = [
+    { name: 'Alt', props: { altKey: true } },
+    { name: 'AltGraph', props: { getModifierState: (key: string) => key === 'AltGraph' } },
+    { name: 'Ctrl+Meta', props: { ctrlKey: true, metaKey: true } },
+  ]
+
+  it('carries the files on Alt, AltGraph and Ctrl+Meta Enter where the composer sends on them', async () => {
+    // 0.1.2-alpha.2 through 0.1.7-rc.1: the Enter command excludes Shift only.
+    for (const { name, props } of modified) {
+      const composer = new Composer()
+      composer.text = 'look'
+      const { input } = lexicalCard()
+      const guard = harness(composer, [ready(1, '/tmp/a.pdf')])
+      try {
+        dispatch('keydown', input, props, () => { composer.send() })
+        assert.deepEqual(composer.sent, ['look\n\n@/tmp/a.pdf'], name)
+        await tick()
+        assert.deepEqual(guard.staged(), [], name)
+      } finally { guard.release() }
+    }
+  })
+
+  it('takes the files back out whole where the composer swallows those keys', async () => {
+    // 0.1.7-rc.2 swallows them without preventing the default, and the
+    // browser's own Enter types a line break at the caret — after the block.
+    for (const { name, props } of modified) {
+      const composer = new Composer()
+      composer.text = 'hello'
+      const { input } = lexicalCard()
+      const guard = harness(composer, [ready(1, '/tmp/a.pdf')])
+      try {
+        const prevented = dispatch('keydown', input, props, (defaultPrevented) => {
+          if (!defaultPrevented) composer.text += '\n'
+        })
+        assert.equal(prevented, true, `${name}: the browser default is pinned`)
+        await tick()
+        assert.equal(composer.text, 'hello', `${name}: the block is withdrawn`)
+        assert.equal(guard.staged().length, 1, `${name}: and the file stays staged`)
+        assert.deepEqual(composer.sent, [])
+      } finally { guard.release() }
+    }
+  })
+
+  it('leaves the default of an Enter every composer sends on alone', () => {
+    const composer = new Composer()
+    const { input } = lexicalCard()
+    const guard = harness(composer, [ready(1, '/tmp/a.pdf')])
+    try {
+      assert.equal(dispatch('keydown', input, { ctrlKey: true }, () => { composer.send() }), false)
+      assert.deepEqual(composer.sent, ['@/tmp/a.pdf'])
     } finally { guard.release() }
   })
 

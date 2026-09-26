@@ -77,25 +77,41 @@ export function acceptsSubmission(phase: string | undefined): boolean {
 }
 
 /**
- * Whether a keydown is one the Lexical composer submits on.
+ * Whether a keydown may reach the Lexical composer's submit.
  *
- * Mirrors the composer's own Enter command: Shift+Enter is a newline;
- * Alt/AltGraph, Ctrl+Meta and Shift with Ctrl or Meta are swallowed; an IME
+ * Mirrors the composer's own Enter command, across its versions: Shift+Enter
+ * is a newline (Shift with Ctrl or Meta is swallowed from 0.1.7-rc.2); an IME
  * composition (including the few milliseconds after it ends) is mid-word; an
  * auto-repeated Enter is ignored. Ctrl or Meta alone is the accelerated send,
- * which the composer resolves to steer or queue itself.
+ * which the composer resolves to steer or queue itself. Alt, AltGraph and
+ * Ctrl+Meta are sends up to 0.1.7-rc.1 and swallowed from 0.1.7-rc.2, so they
+ * count as sends here and {@link isModifiedSendKey} marks them for the guard.
  * @param key - the keydown.
  * @param composing - the editor root's composition marker.
- * @returns true when this keystroke reaches the composer's submit.
+ * @returns true when this keystroke can reach the composer's submit.
  */
 export function isLexicalSendKey(key: KeyFacts, composing: boolean): boolean {
   if (key.key !== 'Enter') return false
-  if (key.altKey || key.altGraph) return false
-  if (key.ctrlKey && key.metaKey) return false
   if (key.shiftKey) return false
   if (key.isComposing || key.keyCode === 229 || composing) return false
   if (key.repeat) return false
   return true
+}
+
+/**
+ * Whether a send key is one only some composers send on.
+ *
+ * 0.1.2-alpha.2 through 0.1.7-rc.1 send on Alt+Enter, AltGraph+Enter and
+ * Ctrl+Meta+Enter, so the mentions have to go in. 0.1.7-rc.2 swallows them
+ * without preventing the browser's own Enter, which then types a line break
+ * after the block just appended — and a draft that no longer ends with the
+ * block reads as sent. The guard prevents that default for these keys, so the
+ * block is either sent or taken back out whole.
+ * @param key - the keydown.
+ * @returns true for Alt, AltGraph or Ctrl+Meta with Enter.
+ */
+export function isModifiedSendKey(key: KeyFacts): boolean {
+  return key.altKey || key.altGraph || (key.ctrlKey && key.metaKey)
 }
 
 /**

@@ -33,7 +33,7 @@ import type { AttachedFile } from './attached.ts'
 import { composeSubmission } from './attached.ts'
 import { appendMentions, withdrawMentions, type Appended, type ComposerFace } from './composer-face.ts'
 import {
-  acceptsSubmission, lexicalEnterVerdict, primaryRoleOf, sendButtonVerdict, sendObserved,
+  acceptsSubmission, isModifiedSendKey, lexicalEnterVerdict, primaryRoleOf, sendButtonVerdict, sendObserved,
   type ComposerFacts, type KeyFacts, type PrimaryRole, type SendVerdict,
 } from './send-plan.ts'
 
@@ -240,8 +240,15 @@ export function installSubmitGuard(deps: SubmitGuardDeps): () => void {
     const card = cardOf(input)
     const composer = deps.composerAt(input)
     if (composer === undefined) return
-    const verdict = lexicalEnterVerdict(keyFacts(event), factsFor(input, card, composer))
-    if (act(verdict, composer)) stop(event)
+    const key = keyFacts(event)
+    const verdict = lexicalEnterVerdict(key, factsFor(input, card, composer))
+    if (act(verdict, composer)) {
+      stop(event)
+      return
+    }
+    // Only the browser's default is prevented: the composer's own handler
+    // still runs, and either sends the block or leaves it for the judge.
+    if (verdict === 'append' && isModifiedSendKey(key)) event.preventDefault()
   }
 
   /** The Send control, enabled: append and let the composer's click send. */
