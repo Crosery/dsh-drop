@@ -16,7 +16,10 @@
 #              official `dsh plugin add`, activates, answers on its three Host
 #              routes (behind the harness's login check where it has one), and
 #              its browser half is served and evaluates against the shell's
-#              module table and the train's real exports
+#              module table and the train's real exports; then, in headless
+#              Google Chrome, the app settles with the plugin active and no
+#              error of its own (client-boot), and a file dropped on the
+#              composer becomes a card in the plugin's rail (client-drop)
 #
 # v0.1.3 passed types and tests on the 0.1.6 trains and was still absent from
 # the 0.1.7 desktop app: admission refused it, and its rail read four icons
@@ -243,6 +246,10 @@ jobs:
           name: ${{ inputs.tarball }}
           path: ${{ runner.temp }}/under-test
 
+      # The browser stages drive Google Chrome, which the ubuntu-latest and
+      # macos-latest images preinstall (actions/runner-images, "Browsers"):
+      # playwright-core, a devDependency, finds it as `channel: 'chrome'`;
+      # CHROME_PATH would override. No browser is downloaded.
       - name: Boot smoke
         id: smoke
         if: matrix.smoke && steps.target.outputs.incomplete != 'true' && steps.install.outputs.incomplete != 'true'
@@ -252,6 +259,7 @@ jobs:
           VERSION: ${{ steps.target.outputs.version }}
           TARBALL: ${{ inputs.tarball != '' && format('{0}/under-test/dsh-drop.tgz', runner.temp) || '' }}
           SMOKE_RESULT: ${{ runner.temp }}/smoke.jsonl
+          SMOKE_SCREENSHOTS: ${{ runner.temp }}/smoke-shots
         run: |
           # Never pack a repointed manifest: the smoke installs what a user gets.
           git checkout -- package.json package-lock.json
@@ -264,7 +272,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: harness-${{ matrix.cell }}
-          path: ${{ runner.temp }}/smoke.jsonl
+          path: |
+            ${{ runner.temp }}/smoke.jsonl
+            ${{ runner.temp }}/smoke-shots
           if-no-files-found: ignore
           retention-days: 30
 
@@ -391,6 +401,7 @@ jobs:
           PNPM_MJS: ${{ steps.runtime.outputs.pnpm }}
           TARBALL: ${{ inputs.tarball != '' && format('{0}/under-test/dsh-drop.tgz', runner.temp) || '' }}
           SMOKE_RESULT: ${{ runner.temp }}/smoke.jsonl
+          SMOKE_SCREENSHOTS: ${{ runner.temp }}/smoke-shots
         run: |
           # `dsh plugin` runs whatever pnpm is on PATH: make that the app's own.
           mkdir -p "$RUNNER_TEMP/bin"
@@ -406,7 +417,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: harness-desktop-bytes
-          path: ${{ runner.temp }}/smoke.jsonl
+          path: |
+            ${{ runner.temp }}/smoke.jsonl
+            ${{ runner.temp }}/smoke-shots
           if-no-files-found: ignore
           retention-days: 30
 

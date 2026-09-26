@@ -134,6 +134,9 @@ assert.match(release, /tarball: release-asset/, 'the release gate must smoke the
 assert.match(release, /r\.sha256 !== asset/, 'the release must refuse an asset whose bytes the gate did not smoke')
 assert.match(release, /dsh-drop\.tgz SHA256SUMS/, 'a release attaches dsh-drop.tgz and SHA256SUMS')
 assert.match(compat, /--tarball "\$TARBALL"/, 'harness-compat.yml must smoke the tarball it is given')
+// The smoke runs the plugin in a real browser; its browser comes with the runner, its driver with npm ci.
+for (const stage of ['client-boot', 'client-drop']) assert.ok(read('scripts/smoke-boot.mjs').includes(`fail('${stage}'`), 'smoke-boot.mjs lost the ' + stage + ' stage')
+assert.ok(semver.valid(pkg.devDependencies['playwright-core']), 'playwright-core must be an exact devDependency: the browser stages drive Chrome through it')
 for (const stage of ['smoke-boot.mjs', 'check-dist.mjs --bundle-only --train "$VERSION"', '--admits', 'harness-verdict.cjs', 'desktop-bytes', "harness-verdict.cjs').unreported("]) assert.ok(compat.includes(stage), 'harness-compat.yml lost ' + stage)
 // The catch-all needs the run's job list; a caller cannot grant a called workflow less than it declares.
 assert.match(compat, /unreported:\s+needs: \[plan, against, desktop-bytes\][\s\S]*?actions: read/, 'the unreported job must follow every job and read the run\'s jobs')

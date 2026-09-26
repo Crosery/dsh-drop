@@ -133,7 +133,7 @@ jobs:
             if (r.outcome !== 'passed') throw new Error(`harness@${cell} smoke ${r.outcome}`)
           }
           console.log('### Verified harness versions\n')
-          console.log(`Boot smoke of this release's tarball (sha256 \`${asset}\`): installed with \`dsh plugin add\` (no exemption), activated, its Host routes answered, and its browser half served.\n`)
+          console.log(`Boot smoke of this release's tarball (sha256 \`${asset}\`): installed with \`dsh plugin add\` (no exemption), activated, its Host routes answered, its browser half served, and — in headless Chrome — the app settled with it and a file dropped on the composer landed in its rail.\n`)
           console.log('| cell | dsh | smoke |\n| --- | --- | --- |')
           for (const [cell, r] of rows) console.log(`| ${cell} | ${r.dsh ?? '?'} | ${r.outcome} |`)
           console.log('\nEvery published harness version the gate swept either passed typecheck, tests, peer admission and this boot smoke or is published incomplete upstream (its @deepseek-ai/dsh does not install); the gate run lists each one.')

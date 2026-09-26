@@ -116,6 +116,129 @@ export function strayPackages(installed, later) {
   return installed.filter(([name, version]) => (name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-')) && later.has(version))
 }
 
+/**
+ * The Web shell's own boot page, in every shell from 0.0.1-rc.5 (English UI):
+ * "Loading plugins…" in `#root` until every entry of `__DSH_BOOT__` is active,
+ * then the app; "Failed to load plugins" with the failed entries when one is
+ * not. Up to 0.1.0-rc.7 the page is a React boot component; from 0.1.0-rc.8 a
+ * DOM splash (`[data-dsh-boot]`) the renderer clears when it mounts — and
+ * without a renderer the splash stays, with no error.
+ */
+export const BOOT_TEXT = { loading: 'Loading plugins', failed: 'Failed to load plugins' }
+
+/**
+ * Where a shell's boot stands, from what its page shows.
+ * @param {{ rootChildren: number, rootText: string, splash: boolean }} page
+ * @returns {'settled' | 'loading' | 'failed'}
+ */
+export function bootState(page) {
+  if (page.rootText.includes(BOOT_TEXT.failed)) return 'failed'
+  if (page.splash || page.rootChildren === 0 || page.rootText.includes(BOOT_TEXT.loading)) return 'loading'
+  return 'settled'
+}
+
+/**
+ * The module ids one plugin-module URL serves: `/plugins/<id>/client.js` up to
+ * 0.1.6, or a combo from 0.1.7 — `/plugins/??<id>/client.js,<id>/client.js&rev=…`,
+ * even for a single module, so a combo's path alone (`/plugins/`) names no one.
+ * @param {string} url
+ * @returns {string[]}
+ */
+export function modulesServedBy(url) {
+  let parsed
+  try { parsed = new URL(url) } catch { return [] }
+  const id = (spec) => {
+    try { return decodeURIComponent(spec).replace(/\/client\.js$/, '') } catch { return spec }
+  }
+  if (parsed.pathname.endsWith('/plugins/') && parsed.search.startsWith('??')) {
+    return parsed.search.slice(2).split('&')[0].split(',').filter(Boolean).map(id)
+  }
+  const single = /\/plugins\/(.+)\/client\.js$/.exec(parsed.pathname)
+  return single === null ? [] : [id(single[1])]
+}
+
+/**
+ * The 1-based `[first, last]` lines one module occupies in a combo script: its
+ * `__ModuleLoader__.load({ id: "<id>"` call up to the next module's. A combo is
+ * the modules' sources joined, so a stack frame there names the combo's URL
+ * whichever module threw. `undefined` when the module is not in it.
+ * @param {string} text
+ * @param {string} id
+ */
+export function moduleLines(text, id) {
+  const lines = String(text).split('\n')
+  const start = (line) => /__ModuleLoader__\.load\(\{\s*id:\s*"([^"]+)"/.exec(line)?.[1]
+  const first = lines.findIndex((line) => start(line) === id)
+  if (first < 0) return undefined
+  let last = lines.length - 1
+  for (let i = first + 1; i < lines.length; i += 1) {
+    if (start(lines[i]) !== undefined) { last = i - 1; break }
+  }
+  return [first + 1, last + 1]
+}
+
+/**
+ * Whether a page error, console message or failed request is this plugin's.
+ * A URL counts when it serves this module alone, when it is a `url:line:col`
+ * inside this module's lines of a combo (`linesOf`, from {@link moduleLines}),
+ * or when a request for a script carrying this module failed. The rest of the
+ * text counts when it names the package, plainly or URL-encoded.
+ * @param {{ text: string, location?: { url: string, line?: number }, request?: string }} report
+ * @param {string} name - the package name.
+ * @param {(url: string) => [number, number] | undefined} linesOf
+ */
+export function blamesPlugin(report, name, linesOf) {
+  const located = []
+  const urlPattern = /(https?:\/\/[^\s)'"]+?)(?::(\d+):(\d+))?(?=[\s)'"]|$)/g
+  for (const match of String(report.text).matchAll(urlPattern)) located.push({ url: match[1], line: match[2] === undefined ? undefined : Number(match[2]) })
+  if (report.location?.url) located.push({ url: report.location.url, line: report.location.line })
+  if (report.request !== undefined && modulesServedBy(report.request).includes(name)) return true
+  for (const { url, line } of located) {
+    const ids = modulesServedBy(url)
+    if (!ids.includes(name)) continue
+    if (ids.length === 1) return true
+    const range = line === undefined ? undefined : linesOf(url)
+    if (range !== undefined && line >= range[0] && line <= range[1]) return true
+  }
+  const rest = String(report.text).replace(urlPattern, '')
+  return [name, encodeURIComponent(name), encodeURIComponent(name).toLowerCase()].some((form) => rest.includes(form))
+}
+
+/**
+ * The buttons that put a first-run notice away without configuring anything:
+ * the testing notice (a full page in Chinese up to 0.1.0-rc.7 — "继续" — a
+ * dialog after), the API-key prompt ("Configure later"), and their likes.
+ */
+export const FIRST_RUN_DISMISS = /^\s*(Continue|继续|Configure later|稍后配置|Skip|跳过|Later|Not now|Got it|知道了|OK|确定|Close|关闭|Dismiss)\s*$/i
+
+/**
+ * What this plugin says when a drop reaches it with no session to hold the
+ * files: the toast and composer notice (`noSession`) and the overlay's reason
+ * (`overlayNoSession`) in `src/client/messages.ts`, both locales.
+ * `tests/harness.test.ts` holds these equal to that file.
+ */
+export const NO_SESSION_COPY = [
+  '请先打开一个会话再拖入文件', 'Open a session before dropping files',
+  '请先打开一个会话', 'Open a session first',
+]
+
+/**
+ * The browser drop's outcome: the dropped file's card in this plugin's rail,
+ * settled (not staging, not failed), and no "open a session first" notice.
+ * @param {{ cards: { text: string, state: string | null }[], notices: string[] }} seen
+ * @param {string} fileName
+ * @returns {{ ok: boolean, why?: string }}
+ */
+export function dropVerdict(seen, fileName) {
+  const refused = seen.notices.filter((notice) => NO_SESSION_COPY.some((copy) => notice.includes(copy)))
+  const card = seen.cards.find((c) => c.text.includes(fileName))
+  if (refused.length > 0) return { ok: false, why: `the drop was refused with "${refused[0]}"${card === undefined ? ' and no card appeared' : ''}` }
+  if (card === undefined) return { ok: false, why: `no rail card for ${fileName}${seen.cards.length > 0 ? ` (cards: ${seen.cards.map((c) => c.text).join(' | ')})` : ''}${seen.notices.length > 0 ? `; notices: ${seen.notices.join(' | ')}` : ''}` }
+  if (card.state === 'error') return { ok: false, why: `the card for ${fileName} shows a failed stage: ${card.text}` }
+  if (card.state === 'busy') return { ok: false, why: `the card for ${fileName} never finished staging: ${card.text}` }
+  return { ok: true }
+}
+
 /** A `dsh web` URL carries a one-time session token; nothing this repo prints may. */
 export function maskTokens(text) {
   return String(text).replace(/token=[\w.~%-]+/g, 'token=***')

@@ -17,11 +17,12 @@ import {
   describeRefusals, gapEvidence, harnessPeers, missingVerdict, npmErrorCode, parseFeed, planCells, planRepoint, refusals, sweepStart, tupleHeads, upstreamGap,
 } from '../scripts/harness-lib.mjs'
 import {
-  NAME_HEADER, ROUTES,
-  absentInjects, classifyDiagnostics, exportedNames, inert, laterHarnessVersions, maskTokens, membersRead, missingMembers, moduleTableOf, noOpenArgs, onTrain,
+  BOOT_TEXT, FIRST_RUN_DISMISS, NAME_HEADER, NO_SESSION_COPY, ROUTES,
+  absentInjects, blamesPlugin, bootState, classifyDiagnostics, dropVerdict, moduleLines, modulesServedBy, exportedNames, inert, laterHarnessVersions, maskTokens, membersRead, missingMembers, moduleTableOf, noOpenArgs, onTrain,
   refusedAsUnpublished, releaseCutoff, strayPackages, strictModule,
 } from '../scripts/smoke-lib.mjs'
 import { BATCH_ROUTE, NAME_HEADER as CONTRACT_NAME_HEADER, RESOLVE_ROUTE, STAGE_ROUTE } from '../src/contract.ts'
+import { messages, type Messages } from '../src/client/messages.ts'
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
   peerDependencies: Record<string, string>
@@ -381,6 +382,88 @@ test("a seed installed at another version cannot vouch for a train's exports", (
   // Cordis follows the train under its own version numbers.
   assert.equal(onTrain(at('4.0.4'), '@deepseek-ai/cordis', '0.1.1-rc.2').names, names)
   assert.deepEqual(onTrain({ why: 'not installed with this harness' }, '@deepseek-ai/dsh-client-ui-dockkit', '0.1.1-rc.2'), { why: 'not installed with this harness' })
+})
+
+test("the browser stage reads the shell's boot page on every train", () => {
+  const page = (rootText: string, extra: Partial<{ rootChildren: number, splash: boolean }> = {}) => ({ rootChildren: 1, splash: false, rootText, ...extra })
+  // Up to 0.1.0-rc.7: a React boot page in #root.
+  assert.equal(bootState(page(`${BOOT_TEXT.loading}…`)), 'loading')
+  // From 0.1.0-rc.8: a DOM splash the renderer clears; without a renderer it stays, with no error.
+  assert.equal(bootState(page('', { splash: true })), 'loading')
+  assert.equal(bootState(page('', { rootChildren: 0 })), 'loading')
+  assert.equal(bootState(page(`${BOOT_TEXT.failed}\nweb boot: 1 entries did not activate\n@crosery/dsh-drop: import failed`)), 'failed')
+  assert.equal(bootState(page('New Session\nWorkspaces\nNo sessions yet\nSettings\nInto the Unknown')), 'settled')
+})
+
+test('the browser stage knows which script carried this module, combos included', () => {
+  const id = '@crosery/dsh-drop'
+  // Up to 0.1.6: one module per script. From 0.1.7: combos, even of one.
+  assert.deepEqual(modulesServedBy('http://127.0.0.1:1/plugins/@crosery/dsh-drop/client.js?rev=1'), [id])
+  assert.deepEqual(modulesServedBy('http://127.0.0.1:1/plugins/%40crosery%2Fdsh-drop/client.js?rev=1'), [id])
+  const combo = 'http://127.0.0.1:1/plugins/??@deepseek-ai/dsh-typert-registry/client.js,@crosery/dsh-drop/client.js&rev=abc'
+  assert.deepEqual(modulesServedBy(combo), ['@deepseek-ai/dsh-typert-registry', id])
+  assert.deepEqual(modulesServedBy('http://127.0.0.1:1/plugins/??@crosery/dsh-drop/client.js&rev=abc'), [id])
+  assert.deepEqual(modulesServedBy('http://127.0.0.1:1/assets/index-C-1AiF3k.js'), [])
+  assert.deepEqual(modulesServedBy('not a url'), [])
+
+  const text = [
+    'window.__ModuleLoader__.load({ id: "@deepseek-ai/dsh-typert-registry", factory: (require) => {', 'a()', '} });',
+    'window.__ModuleLoader__.load({ id: "@crosery/dsh-drop", factory: (require) => {', 'b()', 'c()', '} });',
+  ].join('\n')
+  assert.deepEqual(moduleLines(text, id), [4, 7])
+  assert.deepEqual(moduleLines(text, '@deepseek-ai/dsh-typert-registry'), [1, 3])
+  assert.equal(moduleLines(text, '@crosery/dsh-other'), undefined)
+
+  const linesOf = (url: string) => (url === combo ? [4, 7] as [number, number] : undefined)
+  // A frame in this module's lines of a combo is this plugin's; a frame in another module's is not.
+  assert.equal(blamesPlugin({ text: `TypeError: x is undefined\n    at b (${combo}:5:3)` }, id, linesOf), true)
+  assert.equal(blamesPlugin({ text: `TypeError: x is undefined\n    at a (${combo}:2:3)` }, id, linesOf), false)
+  assert.equal(blamesPlugin({ text: 'boom', location: { url: combo, line: 6 } }, id, linesOf), true)
+  // A script serving this module alone, a failed request carrying it, or the text naming the package.
+  assert.equal(blamesPlugin({ text: 'at f (http://127.0.0.1:1/plugins/@crosery/dsh-drop/client.js?rev=1:9:1)' }, id, linesOf), true)
+  assert.equal(blamesPlugin({ text: `${combo} net::ERR_ABORTED`, request: combo }, id, linesOf), true)
+  assert.equal(blamesPlugin({ text: '@crosery/dsh-drop: toast failed' }, id, linesOf), true)
+  assert.equal(blamesPlugin({ text: 'load failed: %40crosery%2Fdsh-drop' }, id, linesOf), true)
+  assert.equal(blamesPlugin({ text: 'Failed to load resource: the server responded with a status of 404', location: { url: 'http://127.0.0.1:1/favicon.ico' } }, id, linesOf), false)
+})
+
+/** The plugin's notice copy for one document language (`messages()` reads `<html lang>`). */
+function copyFor(lang: string): Messages {
+  const saved = Object.getOwnPropertyDescriptor(globalThis, 'document')
+  Object.defineProperty(globalThis, 'document', { value: { documentElement: { lang } }, configurable: true })
+  try {
+    return messages()
+  } finally {
+    if (saved === undefined) Reflect.deleteProperty(globalThis, 'document')
+    else Object.defineProperty(globalThis, 'document', saved)
+  }
+}
+
+test("the browser drop passes only on a settled card in this plugin's rail, and fails on the no-session refusal", () => {
+  const enMessages = copyFor('en-US')
+  const zhMessages = copyFor('zh-CN')
+  assert.notEqual(enMessages.noSession, zhMessages.noSession)
+  // The copy the smoke looks for is the copy the plugin shows.
+  for (const copy of [enMessages, zhMessages]) {
+    assert.ok(NO_SESSION_COPY.includes(copy.noSession), copy.noSession)
+    assert.ok(NO_SESSION_COPY.includes(copy.overlayNoSession), copy.overlayNoSession)
+  }
+  const file = 'dsh-drop-smoke.txt'
+  const card = (state: string | null) => ({ text: `TXT${file}Text · 49 B · Copied`, state })
+  assert.deepEqual(dropVerdict({ cards: [card(null)], notices: [] }, file), { ok: true })
+  // v0.2.0 on 0.1.0-rc.6 as released: the drop is swallowed with this toast and no card.
+  const refused = dropVerdict({ cards: [], notices: [zhMessages.noSession] }, file)
+  assert.equal(refused.ok, false)
+  assert.match(refused.why!, /^the drop was refused with "请先打开一个会话再拖入文件" and no card appeared$/)
+  assert.match(dropVerdict({ cards: [], notices: [] }, file).why!, /^no rail card for dsh-drop-smoke\.txt$/)
+  assert.match(dropVerdict({ cards: [card('busy')], notices: [] }, file).why!, /never finished staging/)
+  assert.match(dropVerdict({ cards: [card('error')], notices: [] }, file).why!, /shows a failed stage/)
+  assert.match(dropVerdict({ cards: [card(null)], notices: [enMessages.noSession] }, file).why!, /^the drop was refused/)
+})
+
+test('first-run notices are put away without configuring anything', () => {
+  for (const label of ['Continue', '继续', 'Configure later', ' Configure later ', 'OK']) assert.ok(FIRST_RUN_DISMISS.test(label), label)
+  for (const label of ['Go to settings', 'Save and continue', 'Open', 'Send message', 'Continue later?']) assert.ok(!FIRST_RUN_DISMISS.test(label), label)
 })
 
 test('the smoke checks the routes the Host registers', () => {

@@ -21,9 +21,16 @@
  *   requires a specifier the shell's module table cannot answer, or reads a
  *   named export a harness seed module no longer has (v0.1.3's rail read four
  *   icons 0.1.7 renamed: it loaded, and crashed at the first card).
+ * - a browser half that loads and still breaks the page: v0.2.0 on the trains
+ *   before 0.1.0-rc.8 passed every stage above, and in a browser its document
+ *   drop listeners swallowed every file dropped on the composer with "Open a
+ *   session before dropping files". The last two stages run the page in
+ *   headless Google Chrome (playwright-core, a devDependency; `channel:
+ *   'chrome'`, or `--browser` / CHROME_PATH) with a profile inside this run.
  *
  * Stages, in order: harness → pnpm → install → boot → host-activation →
- * client-graph → host-routes → client-load → client-exports.
+ * client-graph → host-routes → client-load → client-exports → client-boot →
+ * client-drop.
  *
  * Everything runs in a throwaway DSH_HOME under the OS temp directory; the
  * script refuses any other home, so running it on a workstation cannot touch a
@@ -54,6 +61,11 @@
  *                           service", plugin or not; and the harness's own
  *                           caret ranges take the next prerelease of the same
  *                           tuple.
+ *   [--browser <path>]      the Chrome the browser stages drive (default CHROME_PATH,
+ *                           else the installed Google Chrome)
+ *   [--screenshots <dir>]   keep the browser stages' screenshots there (also
+ *                           SMOKE_SCREENSHOTS): of a browser stage that fails, and
+ *                           of the composer after the drop
  *   [--keep]
  *   [--accept-risk]         diagnostic only: grant the exact-version exemption
  *                           first, to separate "peer range too narrow" from
@@ -77,8 +89,8 @@ import { parseArgs } from 'node:util'
 import vm from 'node:vm'
 import {
   NAME_HEADER, ROUTES,
-  absentInjects, classifyDiagnostics, inert, installedExports, laterHarnessVersions, maskTokens as mask, missingMembers, moduleTableOf, noOpenArgs,
-  refusedAsUnpublished, releaseCutoff, strayPackages,
+  FIRST_RUN_DISMISS, absentInjects, blamesPlugin, bootState, classifyDiagnostics, dropVerdict, inert, installedExports, laterHarnessVersions, maskTokens as mask,
+  missingMembers, moduleLines, moduleTableOf, modulesServedBy, noOpenArgs, refusedAsUnpublished, releaseCutoff, strayPackages,
 } from './smoke-lib.mjs'
 
 const { values } = parseArgs({
@@ -93,6 +105,8 @@ const { values } = parseArgs({
     'command-timeout-ms': { type: 'string', default: '600000' },
     graph: { type: 'string', default: 'released' },
     keep: { type: 'boolean', default: false },
+    browser: { type: 'string' },
+    screenshots: { type: 'string' },
   },
 })
 const root = fileURLToPath(new URL('..', import.meta.url))
@@ -319,6 +333,214 @@ function unmetPeers(modules) {
   return unmet
 }
 
+/**
+ * The browser stages. Everything they touch lives in this run's directory: the
+ * browser profile, the dropped file, the screenshots unless `--screenshots`
+ * (or SMOKE_SCREENSHOTS) names a directory to keep them in.
+ *
+ * - client-boot: the index, with the login cookie the token exchange above
+ *   gave where the harness has one, settles into the app — no "Failed to load
+ *   plugins", no boot page left after 90 s ({@link bootState}); this plugin's
+ *   module was served to the page; and in a 3 s quiet window after, no page
+ *   error, console error or failed request that is this plugin's
+ *   ({@link blamesPlugin}). Others are noted, not held against it.
+ * - client-drop: whatever the train needs to give the composer a session —
+ *   dismissing first-run dialogs, and on trains with no default workspace
+ *   choosing this run's home in the in-page picker — then a file dropped on
+ *   the composer through the DevTools protocol, as the OS would, must appear as
+ *   a settled card in this plugin's rail, with no "open a session first"
+ *   notice ({@link dropVerdict}).
+ */
+async function inBrowser(base, cookie) {
+  let playwright
+  try {
+    playwright = await import('playwright-core')
+  } catch (error) {
+    fail('client-boot', `playwright-core is not installed (npm ci installs it as a devDependency): ${error?.message ?? error}`)
+  }
+  const chromium = playwright.chromium ?? playwright.default?.chromium
+  const profile = join(work, 'browser-profile')
+  assert.ok(profile.startsWith(work), 'refusing a browser profile outside this run')
+  const executablePath = values.browser ?? process.env.CHROME_PATH
+  const shots = values.screenshots ?? process.env.SMOKE_SCREENSHOTS
+  const moduleId = pkg.name
+  let context
+  let page
+  const shoot = async (name) => {
+    if (shots === undefined || page === undefined) return
+    try {
+      mkdirSync(shots, { recursive: true })
+      await page.screenshot({ path: join(shots, `${result.dsh ?? 'dsh'}-${name}.png`), timeout: 15_000 })
+    } catch {}
+  }
+  try {
+    try {
+      context = await chromium.launchPersistentContext(profile, {
+        headless: true, locale: 'en-US', viewport: { width: 1400, height: 900 }, timeout: 60_000,
+        ...(executablePath ? { executablePath } : { channel: 'chrome' }),
+      })
+    } catch (error) {
+      fail('client-boot', `could not start ${executablePath ?? 'Google Chrome (channel chrome)'}: ${String(error?.message ?? error).split('\n')[0]} — set CHROME_PATH or --browser`)
+    }
+    if (cookie) {
+      const at = cookie.indexOf('=')
+      await context.addCookies([{ name: cookie.slice(0, at), value: cookie.slice(at + 1), url: base.href }])
+    }
+    page = context.pages()[0] ?? await context.newPage()
+    page.setDefaultTimeout(30_000)
+
+    // Every report the page makes, and every script that carried this module.
+    const reports = []
+    const served = []
+    const combos = new Map()
+    page.on('pageerror', (error) => reports.push({ kind: 'page error', text: String(error?.stack ?? error) }))
+    page.on('console', (message) => {
+      if (message.type() !== 'error') return
+      const location = message.location()
+      reports.push({ kind: 'console error', text: message.text(), location: { url: location.url, line: location.lineNumber + 1 } })
+    })
+    page.on('requestfailed', (request) => reports.push({ kind: 'failed request', text: `${request.url()} ${request.failure()?.errorText ?? ''}`, request: request.url() }))
+    page.on('response', (response) => {
+      const ids = modulesServedBy(response.url())
+      if (!ids.includes(moduleId)) return
+      served.push(`${response.status()} ${ids.length > 1 ? `combo of ${ids.length}` : 'alone'}`)
+      if (response.status() >= 400) reports.push({ kind: `HTTP ${response.status()}`, text: response.url(), request: response.url() })
+      else if (ids.length > 1) combos.set(response.url(), response.text().then((text) => moduleLines(text, moduleId), () => undefined))
+    })
+    const linesOf = (() => {
+      const known = new Map()
+      return { settle: async () => { for (const [u, p] of combos) known.set(u, await p) }, of: (u) => known.get(u) }
+    })()
+    const judge = async () => {
+      await linesOf.settle()
+      const ours = []
+      const others = []
+      for (const report of reports) (blamesPlugin(report, moduleId, linesOf.of) ? ours : others).push(`${report.kind}: ${mask(report.text).slice(0, 400)}`)
+      return { ours, others }
+    }
+
+    // client-boot
+    try {
+      await page.goto(base.href, { waitUntil: 'domcontentloaded', timeout: 60_000 })
+    } catch (error) {
+      await shoot('client-boot')
+      fail('client-boot', `the page did not load: ${String(error?.message ?? error).split('\n')[0]}`)
+    }
+    const snapshot = () => page.evaluate(() => {
+      const root = document.querySelector('#root')
+      return { rootChildren: root?.childElementCount ?? 0, rootText: root instanceof HTMLElement ? root.innerText.slice(0, 2000) : '', splash: document.querySelector('[data-dsh-boot]') !== null }
+    }).catch(() => ({ rootChildren: 0, rootText: '', splash: true }))
+    let state = 'loading'
+    let last
+    const deadline = Date.now() + 90_000
+    while (Date.now() < deadline) {
+      last = await snapshot()
+      state = bootState(last)
+      if (state !== 'loading') break
+      await sleep(250)
+    }
+    if (state !== 'settled') {
+      await shoot('client-boot')
+      fail('client-boot', state === 'failed' ? `the shell reports: ${mask(last.rootText).slice(0, 800)}` : `still on the boot page after 90 s: ${mask(last?.rootText ?? '').slice(0, 300)}`)
+    }
+    await sleep(3000)
+    if (!served.some((s) => s.startsWith('2'))) fail('client-boot', `the page never loaded this plugin's module (${served.join(', ') || 'no request for it'})`)
+    const booted = await judge()
+    if (booted.ours.length > 0) {
+      await shoot('client-boot')
+      fail('client-boot', booted.ours)
+    }
+    if (booted.others.length > 0) console.log(`note: the page reported, not about this plugin:\n  ${booted.others.join('\n  ')}`)
+    stage('client-boot', 'passed', `the app settled in Chrome with this plugin active (module served: ${served.join(', ')}); nothing on the page is this plugin's error${booted.others.length > 0 ? `; ${booted.others.length} other report(s), see log` : ''}`)
+
+    // client-drop
+    const steps = []
+    // First-run notices, dialogs or full pages (FIRST_RUN_DISMISS); a dialog
+    // with none of those buttons is closed with Escape.
+    const dismissDialogs = async () => {
+      for (let round = 0; round < 6; round += 1) {
+        const dialogs = page.locator('[role=dialog]:visible, [role=alertdialog]:visible')
+        const scope = await dialogs.count() > 0 ? dialogs.first() : page.locator('body')
+        const button = scope.locator('button:visible').filter({ hasText: FIRST_RUN_DISMISS })
+        if (await button.count() === 0) {
+          if (await dialogs.count() === 0) return
+          steps.push(`dismissed "${((await dialogs.first().getAttribute('aria-label')) ?? '').slice(0, 60)}" with Escape`)
+          await page.keyboard.press('Escape')
+        } else {
+          const heading = (await scope.locator('h1:visible, h2:visible, h3:visible').first().innerText({ timeout: 2000 }).catch(() => '')).trim()
+          steps.push(`dismissed "${heading.slice(0, 60)}" with ${(await button.first().innerText()).trim()}`)
+          await button.first().click({ timeout: 10_000 })
+        }
+        await sleep(800)
+      }
+    }
+    const composerPoint = () => page.evaluate(() => {
+      const visible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 }
+      const el = [...document.querySelectorAll('[data-composer-card] [data-composer-input], [data-composer-card] textarea, [data-composer-input], textarea')].find(visible)
+      if (el === undefined) return undefined
+      const r = el.getBoundingClientRect()
+      return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }
+    })
+    try {
+      await dismissDialogs()
+      // Trains without a default workspace start with no session, and their
+      // workspace control reads "Choose workspace" (later ones name the
+      // workspace there): choose this run's home in the in-page picker, which
+      // opens a session in it.
+      const choose = page.getByRole('button', { name: /^Choose workspace$/ }).filter({ hasText: /^\s*Choose workspace\s*$/ })
+      if (await choose.count() > 0 && await choose.first().isVisible()) {
+        await choose.first().click({ timeout: 10_000 })
+        const picker = page.getByRole('dialog', { name: /Select Workspace Directory/i })
+        await picker.waitFor({ timeout: 20_000 })
+        await picker.getByRole('button', { name: /^Open$/ }).click({ timeout: 10_000 })
+        await picker.waitFor({ state: 'hidden', timeout: 20_000 })
+        steps.push('chose a workspace in the picker')
+        await sleep(1500)
+        await dismissDialogs()
+      }
+    } catch (error) {
+      await shoot('client-drop')
+      fail('client-drop', { reason: `could not give the composer a session: ${String(error?.message ?? error).split('\n')[0]}`, steps })
+    }
+    const point = await composerPoint()
+    if (point === undefined) {
+      await shoot('client-drop')
+      fail('client-drop', { reason: 'no composer input on the page', steps })
+    }
+    const fileName = 'dsh-drop-smoke.txt'
+    const fixture = join(work, 'drop-fixture', fileName)
+    mkdirSync(dirname(fixture), { recursive: true })
+    writeFileSync(fixture, `dropped by the dsh-drop boot smoke ${Date.now()}\n`)
+    const cdp = await context.newCDPSession(page)
+    const data = { items: [], files: [fixture], dragOperationsMask: 1 }
+    for (const type of ['dragEnter', 'dragOver', 'dragOver', 'drop']) await cdp.send('Input.dispatchDragEvent', { type, x: point.x, y: point.y, data })
+    // The card appears once the Host has staged the copy; watch notices meanwhile.
+    const seen = { cards: [], notices: [] }
+    const until = Date.now() + 30_000
+    while (Date.now() < until) {
+      const now = await page.evaluate(() => ({
+        cards: [...document.querySelectorAll('[data-dshdrop-key]')].map((c) => ({ text: c.textContent ?? '', state: c.getAttribute('data-state') })),
+        notices: [...document.querySelectorAll('.dsh-drop-toast, [role=status], [role=alert]')].map((n) => (n.textContent ?? '').trim()).filter(Boolean),
+      })).catch(() => ({ cards: [], notices: [] }))
+      seen.cards = now.cards
+      for (const notice of now.notices) if (!seen.notices.includes(notice)) seen.notices.push(notice)
+      const verdict = dropVerdict(seen, fileName)
+      if (verdict.ok || verdict.why.startsWith('the drop was refused')) break
+      await sleep(250)
+    }
+    const verdict = dropVerdict(seen, fileName)
+    const dropped = await judge()
+    if (!verdict.ok || dropped.ours.length > 0) {
+      await shoot('client-drop')
+      fail('client-drop', { reason: verdict.ok ? 'the drop worked, but the page reported this plugin\'s errors' : verdict.why, errors: dropped.ours, steps })
+    }
+    await shoot('client-drop')
+    stage('client-drop', 'passed', `${steps.length > 0 ? `${steps.join('; ')}; ` : ''}a file dropped on the composer became a settled card in this plugin's rail: ${seen.cards.find((c) => c.text.includes(fileName))?.text}`)
+  } finally {
+    await Promise.race([context?.close().catch(() => {}), sleep(20_000, true)])
+  }
+}
+
 let child
 try {
   // 1. The harness under test.
@@ -394,9 +616,16 @@ try {
 
   // 5. Boot the Web profile and wait for the URL line — printed only after the
   //    loader settled and the startup audit ran.
+  //    Its HOME is a directory of this run: 0.1.7 creates the default
+  //    workspace under ~/Documents on first page load, and the workspace picker
+  //    of the trains without one opens at home. SSH_CONNECTION makes that
+  //    picker the in-page one (a native dialog would need a desktop session).
   const port = await freePort()
+  const userHome = join(work, 'user-home')
+  mkdirSync(userHome, { recursive: true })
+  const bootEnv = { ...env, HOME: userHome, SSH_CONNECTION: '127.0.0.1 0 127.0.0.1 0' }
   child = spawn(process.execPath, [dshBin, '--profile', 'web', ...noOpenFlag(dshBin, env), '--host', '127.0.0.1', '--port', String(port)], {
-    env, stdio: ['ignore', 'pipe', 'pipe'], detached: true,
+    env: bootEnv, stdio: ['ignore', 'pipe', 'pipe'], detached: true,
   })
   let stdout = ''
   let stderr = ''
@@ -532,6 +761,10 @@ try {
     members.checked.length > 0 ? `checked against this train: ${members.checked.join(', ')}` : 'the bundle reads no harness seed member',
     members.unchecked.length > 0 ? `unchecked: ${members.unchecked.join(', ')}` : '',
   ].filter(Boolean).join('; '))
+
+  // 10. The same page in a real browser: the app settles with this plugin
+  //     active, and a file dropped on the composer lands in this plugin's rail.
+  await inBrowser(base, cookie)
 } catch (error) {
   if (!(error instanceof StageFailed)) stage('smoke', 'failed', mask(String(error?.message ?? error)).slice(0, 2000))
 } finally {
