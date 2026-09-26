@@ -14,7 +14,7 @@ import { createRequire } from 'node:module'
 import test from 'node:test'
 import {
   FLOOR, REQUIRED, TRAIN_EXTRAS,
-  describeRefusals, harnessPeers, npmErrorCode, parseFeed, planCells, planRepoint, refusals, sweepStart, tupleHeads, upstreamGap,
+  describeRefusals, gapEvidence, harnessPeers, missingVerdict, npmErrorCode, parseFeed, planCells, planRepoint, refusals, sweepStart, tupleHeads, upstreamGap,
 } from '../scripts/harness-lib.mjs'
 import {
   NAME_HEADER, ROUTES,
@@ -131,7 +131,9 @@ test('repointing keeps the pin of a package the train never published, unless th
   // The input manifest is untouched.
   assert.equal(fixture.devDependencies['@deepseek-ai/dsh-settings'], '0.1.7-rc.2')
 
-  assert.deepEqual(planRepoint(fixture, '0.1.0-rc.7', published([REQUIRED[0]!, ...TRAIN_EXTRAS])).missing, [REQUIRED[0]])
+  // The renderer is not required: a train without it keeps the pin. A peer is.
+  const noRenderer = planRepoint(fixture, '0.1.0-rc.7', published(['@deepseek-ai/dsh-client-ui-renderer', ...TRAIN_EXTRAS]))
+  assert.deepEqual([noRenderer.missing, noRenderer.kept], [[], ['@deepseek-ai/dsh-client-ui-renderer']])
   const noPeer = planRepoint(fixture, '0.1.9-rc.1', published(['@deepseek-ai/dsh-settings', ...TRAIN_EXTRAS]))
   assert.deepEqual([noPeer.missing, noPeer.added], [['@deepseek-ai/dsh-settings'], []])
   // An exact cordis is taken as is; one that cannot be resolved keeps the pin.
@@ -139,6 +141,62 @@ test('repointing keeps the pin of a package the train never published, unless th
   assert.equal(exactShipped.manifest.devDependencies['@deepseek-ai/cordis'], '4.0.2')
   const unresolved = planRepoint(fixture, FLOOR, { publishedAt: () => true, shipped: { '@deepseek-ai/cordis': '^9.0.0' }, exact: () => undefined }) as Plan
   assert.equal(unresolved.manifest.devDependencies['@deepseek-ai/cordis'], '4.0.4')
+})
+
+test('the trains before 0.1.0-rc.8 keep the renderer pin for types, and gain dsh-client-runtime', () => {
+  // The real manifest's shape, as the repoint sees it on 0.1.0-rc.2 and 0.0.1-rc.5,
+  // with the packages npm answers for there.
+  const early = {
+    peerDependencies: { '@deepseek-ai/cordis': '^4.0.0', '@deepseek-ai/dsh-home-paths': '*', '@deepseek-ai/dsh-host-webserver': '*', '@deepseek-ai/dsh-settings': '*' },
+    devDependencies: Object.fromEntries([
+      'api-remotes', 'client-locale', 'client-store', 'client-ui-conversation', 'client-ui-input-trigger', 'client-ui-primitives',
+      'client-ui-renderer', 'client-ui-slots', 'home-paths', 'host-webserver', 'settings',
+    ].map((name) => [`@deepseek-ai/dsh-${name}`, '0.1.7-rc.2'])),
+  }
+  // Absent before 0.1.2 (store) and before 0.1.0-rc.8 (renderer); everything else, runtime included, is published.
+  const facts = { publishedAt: (name: string) => !['@deepseek-ai/dsh-client-store', '@deepseek-ai/dsh-client-ui-renderer'].includes(name) }
+  for (const version of ['0.0.1-rc.5', '0.1.0-rc.2', '0.1.0-rc.7']) {
+    const plan = planRepoint(early, version, facts) as { manifest: typeof early, missing: string[], kept: string[], added: string[] }
+    assert.deepEqual(plan.missing, [], version)
+    assert.deepEqual(plan.kept, ['@deepseek-ai/dsh-client-store', '@deepseek-ai/dsh-client-ui-renderer'], version)
+    assert.deepEqual(plan.added, ['@deepseek-ai/dsh-client-runtime'], version)
+    assert.equal(plan.manifest.devDependencies['@deepseek-ai/dsh-client-ui-conversation'], version)
+    assert.equal(plan.manifest.devDependencies['@deepseek-ai/dsh-client-ui-renderer'], '0.1.7-rc.2')
+  }
+  // 0.0.1-rc.1 and rc.2 never published dsh-home-paths (first 0.0.1-rc.3), a peer the Host imports: missing.
+  const first = planRepoint(early, '0.0.1-rc.1', { publishedAt: (name: string) => !['@deepseek-ai/dsh-client-store', '@deepseek-ai/dsh-client-ui-renderer', '@deepseek-ai/dsh-client-ui-input-trigger', '@deepseek-ai/dsh-home-paths'].includes(name) })
+  assert.deepEqual([first.missing, first.kept], [['@deepseek-ai/dsh-home-paths'], ['@deepseek-ai/dsh-client-store', '@deepseek-ai/dsh-client-ui-input-trigger', '@deepseek-ai/dsh-client-ui-renderer']])
+  assert.deepEqual(REQUIRED, ['@deepseek-ai/dsh-client-ui-conversation', '@deepseek-ai/dsh-client-ui-slots'])
+})
+
+test("a train missing what the plugin needs is incomplete only when npm refuses the harness itself, and says why", () => {
+  const missing = [{ name: '@deepseek-ai/dsh-home-paths', why: 'predates' }]
+  // What npm answers for a bare `npm install @deepseek-ai/dsh@0.0.1-rc.1` today.
+  const e404 = [
+    'npm error code E404',
+    'npm error 404 Not Found - GET https://registry.npmjs.org/@deepseek-ai%2fdsh-agent-tool-mode - Not found',
+    'npm error 404',
+    "npm error 404  The requested resource '@deepseek-ai/dsh-agent-tool-mode@^0.0.1-rc.1' could not be found or you do not have permission to access it.",
+  ].join('\n')
+  assert.equal(gapEvidence(e404), 'E404: npm has no @deepseek-ai/dsh-agent-tool-mode@^0.0.1-rc.1')
+  assert.equal(gapEvidence(e404.split('\n').slice(0, 2).join('\n')), 'E404: npm has no @deepseek-ai/dsh-agent-tool-mode')
+  assert.equal(gapEvidence('npm error code ETARGET\nnpm error notarget No matching version found for @deepseek-ai/dsh-x@0.1.9-rc.1.'), 'ETARGET: @deepseek-ai/dsh-x@0.1.9-rc.1 is not on npm')
+  assert.equal(gapEvidence('npm error code ECONNRESET'), undefined)
+
+  const upstream = missingVerdict('0.0.1-rc.1', missing, { ok: false, output: e404 })
+  assert.equal(upstream.incomplete, true)
+  // The first line is what CI's notice and the sweep's note show: it carries npm's evidence.
+  assert.match(upstream.message.split('\n')[0]!, /^@deepseek-ai\/dsh@0\.0\.1-rc\.1 does not install on its own \(E404: npm has no @deepseek-ai\/dsh-agent-tool-mode@\^0\.0\.1-rc\.1\): published incomplete upstream; also not published at 0\.0\.1-rc\.1, and this plugin needs it: @deepseek-ai\/dsh-home-paths \(predates\)$/)
+  // A harness that installs while lacking what the plugin needs is drift: the ranges admit it.
+  const runnable = missingVerdict('0.1.9-rc.1', missing, { ok: true, output: 'added 900 packages' })
+  assert.equal(runnable.incomplete, false)
+  assert.match(runnable.message, /installs, yet this train lacks what the plugin needs/)
+  // A registry that did not answer proves nothing: a failure, not a neutral cell.
+  for (const bare of [{ ok: false, output: 'npm error code ECONNRESET' }, { ok: false, timedOut: true, output: 'npm error code E404' }]) {
+    const unknown = missingVerdict('0.0.1-rc.1', missing, bare)
+    assert.equal(unknown.incomplete, false)
+    assert.match(unknown.message, /did not answer \((ECONNRESET|timed out)\), which proves nothing/)
+  }
 })
 
 test("only npm's answers about the packages count as an upstream gap", () => {

@@ -8,12 +8,13 @@
  *
  * Cells:
  *   pinned              what devDependencies pin — the pull-request baseline
- *   floor               0.1.1-rc.2, the oldest train with live evidence
+ *   floor               0.1.1-rc.2, the train the owner runs, gating PRs
  *   desktop             what the official desktop app's update feed ships today
  *   latest|next|alpha   an npm dist-tag of @deepseek-ai/dsh
  *   <exact version>     one published @deepseek-ai/dsh version (sweep rows)
  *   sweep               (--plan only) every published version from the lowest
- *                       one the peer ranges admit, read from npm at run time
+ *                       one the peer ranges admit (all of them), read from npm
+ *                       at run time
  *
  * `desktop` reads both platform feeds the app has (mac-arm64, win-x64; the app
  * hard-codes the `nightly` channel and no other feed exists), refuses a
@@ -25,7 +26,10 @@
  *            published to the exact version (a package it never published
  *            keeps its pin unless the plugin requires it; cordis follows the
  *            train), pins every other devDependency at its package-lock.json
- *            version, and writes the exact versions to the step summary.
+ *            version, and writes the exact versions to the step summary. A
+ *            required package the train never published is incomplete only
+ *            when `@deepseek-ai/dsh` itself fails to install there with npm's
+ *            answer about its packages, which the notice quotes.
  * --install  installs the result from scratch (`npm ci` for `pinned`), in
  *            legacy peer mode with the train's own harness peers if its peer
  *            graph does not resolve on its own — see `installTrain`.
@@ -52,7 +56,7 @@ import { parseArgs } from 'node:util'
 import semver from 'semver'
 import {
   DESKTOP_FEEDS, DIST_TAGS, FLOOR, HARNESS,
-  RegistryError, describeRefusals, harnessPeers, installTrain, parseFeed, planCells, refusals, repointManifest, run, sweepStart, tail, versionsOf, view,
+  RegistryError, bareHarnessInstalls, describeRefusals, harnessPeers, installTrain, missingVerdict, parseFeed, planCells, refusals, repointManifest, run, sweepStart, tail, versionsOf, view,
 } from './harness-lib.mjs'
 
 const INCOMPLETE = 3
@@ -176,9 +180,11 @@ async function target(cell) {
     if (!existsSync(lockPath)) throw new Error('package-lock.json is missing: a repointed cell pins its non-harness devDependencies at the lockfile\'s versions')
     const repointed = repointManifest(pkg, version, JSON.parse(readFileSync(lockPath, 'utf8')))
     if (repointed.missing.length > 0) {
-      const missing = repointed.missing.map((m) => `${m.name} (${m.why})`).join(', ')
-      out('missing', missing)
-      throw incomplete(`not published at ${version}, and this plugin needs it: ${missing}`)
+      out('missing', repointed.missing.map((m) => `${m.name} (${m.why})`).join(', '))
+      // Whether anybody can run this train at all decides what the gap is.
+      const verdict = missingVerdict(version, repointed.missing, bareHarnessInstalls(version))
+      if (verdict.incomplete) throw incomplete(verdict.message)
+      throw new Error(verdict.message)
     }
     // Noted once, by the step that repoints; the install step repeats the plan only to install it.
     if (flags.repoint) {
@@ -208,7 +214,7 @@ async function target(cell) {
       out('via', result.via)
       summary(`- installed: ${result.via}`)
       if (!result.ok) {
-        if (result.incomplete) throw incomplete(`${HARNESS}@${version} does not install even on its own:\n${tail(result.output, 20)}`)
+        if (result.incomplete) throw incomplete(`${HARNESS}@${version} does not install even on its own (${result.evidence}):\n${tail(result.output, 20)}`)
         throw new Error(`install failed:\n${tail(result.output, 40)}`)
       }
     }
@@ -221,7 +227,7 @@ async function target(cell) {
       throw new Error(
         `the peer ranges do not admit dsh ${version} — ${refused.length} of ${peers.length} harness peers refuse it:\n  ` +
           describeRefusals(refused).join('\n  ') +
-          '\nWiden a range only after types, tests and `smoke-boot.mjs --accept-risk` pass on this version (docs/harness-compatibility.md).',
+          '\nWiden a range only after the sweep and `smoke-boot.mjs --accept-risk` pass on this version (docs/harness-compatibility.md).',
       )
     }
     console.log(`peer admission: ${version} is admitted by all ${peers.length} harness peers under both rules`)
