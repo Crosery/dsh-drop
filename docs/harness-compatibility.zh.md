@@ -12,7 +12,7 @@ Host peer 对每个已发布的元组各用一个带预发布标记的比较器�
 
 `scripts/check-invariants.mjs` 断言每个已发布版本（`PUBLISHED_TRAINS`）在两种规则下都被接纳，未发布的——0.0.2、0.1.4、0.1.8、0.2.0——在两种规则下都被拒绝，且每个比较器都是一对闭合的 `>=X <M.m.(p+1)-0`：新元组只有扫描并冒烟之后才会被接纳。运行时服务包放 peer，dev 镜像已验证的具体版本。发布 checkout 不得依赖本地 link:、file:、workspace:。
 
-没有任何 peer 标为可选（`peerDependenciesMeta`）。`dsh-home-paths` 是唯一在某些序列上缺席的 peer——0.0.1-rc.1 与 rc.2，而这两个版本的 `@deepseek-ai/dsh` 本身就装不上——且 Host 按值 import 它，标为可选等于声称 Host 没有它也能跑。这也不会改变准入：0.1.7 的 `evaluatePluginCompatibility` 对每个 `@deepseek-ai/dsh*` peer 都做范围检查，从不读取 `peerDependenciesMeta`。0.1.0-rc.8 之前没有的 `dsh-client-ui-renderer` 根本不是 peer——它是用于类型的 devDependency 和一条 `dsh.client.inject` 边。
+没有任何 peer 标为可选（`peerDependenciesMeta`）。`dsh-home-paths` 是唯一在某些序列上缺席的 peer——0.0.1-rc.1 与 rc.2，而这两个版本的 `@deepseek-ai/dsh` 本身就装不上——且 Host 按值 import 它，标为可选等于声称 Host 没有它也能跑。这也不会改变准入：0.1.7 的 `evaluatePluginCompatibility`（`@deepseek-ai/dsh-app-boot` 0.1.7-rc.2，`lib/index.js:286`）对每个 `@deepseek-ai/dsh*` peer 都做范围检查，从不读取 `peerDependenciesMeta`，`dsh-plugin-manager` 也没有任何相关处理——不要为了让某个序列通过而加上它。0.1.0-rc.8 之前没有的 `dsh-client-ui-renderer` 根本不是 peer——它是用于类型的 devDependency 和一条 `dsh.client.inject` 边。
 
 ## CI 组合
 
@@ -32,7 +32,11 @@ Host peer 对每个已发布的元组各用一个带预发布标记的比较器�
 - **types**：Host、客户端、测试三个程序对该序列声明做类型检查，再跑 `check-dist.mjs --bundle-only --train <版本>`——客户端产物只能 require 该序列自己的 shell 应答的模块说明符（该版本 `@deepseek-ai/dsh-web-frontend` 中的模块表：0.0.1-rc.5 至 0.1.0-rc.7 有十个，含 `dsh-client-web-react`、`-ui-attachment` 与 `-schema-form`；0.1.0-rc.8 与 0.1.1 七个；都没有 `dsh-client-store`），读取的每个 harness 模块成员都必须由恰好装在该版本的包导出；该序列从未发布、沿用本仓库 pin 的包不能为它作证；
 - **tests**：测试套件对该序列的包运行；
 - **admission**：每个 harness peer 在两种 semver 规则下都接纳该版本；
-- **smoke**：`scripts/smoke-boot.mjs`——打包当前 checkout，把精确版本的 `@deepseek-ai/dsh` 装进系统临时目录下的一次性 `DSH_HOME`，用 `dsh plugin add` 添加 tarball（不加豁免），启动 `dsh --profile web`，并要求：没有指向本插件的 "skipping profile bundle" 或 "did not activate"；三条路由已挂载，在具备 `connection.requestRejection` 的 harness（0.1.2 起）上无登录 cookie 时返回 401、在此之前对匿名调用开放，带 cookie 时可用——实际暂存一个文件到该 home 并解析成功；插件出现在 `__DSH_BOOT__` 中；服务端提供的产物能按 shell 自己的模块表求值；产物读取的每个 harness 成员都存在于该序列已安装的包里。只有 `dsh web --help` 列出 `--no-open` 时才传这个参数（0.0.1-rc.5 至 0.1.0-rc.7 从不打开浏览器，并把它当作未知参数拒绝）。启动图里缺少的 `dsh.client.inject` 目标——0.1.0-rc.8 之前的 `dsh-client-ui-renderer`——只报告、不判失败：这些边是说明性的图元数据，插件能否加载由之后各项判定。扫描行对**每个**版本都做冒烟（`smoke: all`，每周运行、手动触发与发版门禁的默认值）；`heads`——每个元组的最新构建及各命名格解析出的版本——与 `none` 仍可在手动触发时选用。矩阵任务并行运行，一次扫描的耗时约等于最慢的那一格。
+- **smoke**：`scripts/smoke-boot.mjs`——打包当前 checkout，把精确版本的 `@deepseek-ai/dsh` 装进系统临时目录下的一次性 `DSH_HOME`，用 `dsh plugin add` 添加 tarball（不加豁免），启动 `dsh --profile web`，并要求：没有指向本插件的 "skipping profile bundle" 或 "did not activate"；三条路由已挂载，在具备 `connection.requestRejection` 的 harness（0.1.2 起）上无登录 cookie 时返回 401、在此之前对匿名调用开放，带 cookie 时可用——实际暂存一个文件到该 home 并解析成功；插件出现在 `__DSH_BOOT__` 中；服务端提供的产物能按 shell 自己的模块表求值；产物读取的每个 harness 成员都存在于该序列已安装的包里。随后在无头 Google Chrome 中运行页面（通过精确版本的 devDependency playwright-core；`channel: 'chrome'`，ubuntu-latest 与 macos-latest runner 镜像均预装，也可用 `--browser` / `CHROME_PATH` 指定），浏览器 profile 位于本次运行目录内：
+  - **client-boot**：带上 harness 有登录检查时换得的 cookie 打开首页，90 秒内应进入应用——出现 "Failed to load plugins"，或启动页一直不退，都判失败（0.1.0-rc.8 起缺少 renderer 时启动页会一直停着且没有报错）；插件模块必须被页面加载（0.1.7 以合并脚本 `/plugins/??a/client.js,b/client.js` 提供模块，会解析其中的列表）；在随后 3 秒的静默窗口内，不得出现属于本插件的页面错误、console 错误或失败请求：合并脚本中的调用栈帧只有落在本模块的行范围内才算本插件的；其余只记录、不归咎于插件；
+  - **client-drop**：收起首次运行的提示（内测声明的「继续」、API key 提示的 "Configure later"）；没有默认工作区的序列（0.1.7 之前）在页内目录选择器中选本次运行自己的 home，从而在其中打开一个会话；再通过 DevTools 协议（`Input.dispatchDragEvent`，与操作系统投递的方式相同）把一个文本文件拖放到输入框上，要求插件附件栏中出现该文件的一张已稳定的卡片，且没有「请先打开会话」类提示。`dsh web` 运行时 `HOME` 位于本次运行目录内——0.1.7 首次加载页面时会在 `~/Documents` 下创建默认工作区——并设置 `SSH_CONNECTION`，使目录选择器为页内版本。浏览器阶段失败时会在该格的产物里留下截图。
+
+  只有 `dsh web --help` 列出 `--no-open` 时才传这个参数（0.0.1-rc.5 至 0.1.0-rc.7 从不打开浏览器，并把它当作未知参数拒绝）。启动图里缺少的 `dsh.client.inject` 目标——0.1.0-rc.8 之前的 `dsh-client-ui-renderer`——只报告、不判失败：这些边是说明性的图元数据，插件能否加载由之后各项判定。扫描行对**每个**版本都做冒烟（`smoke: all`，每周运行、手动触发与发版门禁的默认值）；`heads`——每个元组的最新构建及各命名格解析出的版本——与 `none` 仍可在手动触发时选用。矩阵任务并行运行，一次扫描的耗时约等于最慢的那一格。
 
 `desktop-bytes` 下载 feed 指向的 mac-arm64 zip，要求其 sha512 与 feed 一致、内置的 `desktop-runtime.json` 和 `@deepseek-ai/dsh` 与 feed 版本一致，然后以应用的 Electron 可执行文件作为 Node（`ELECTRON_RUN_AS_NODE=1`）对 `Contents/Resources/app.asar/dsh` 跑同样的冒烟，PATH 上用应用自带的 pnpm。应用窗口、preload 桥（`__DSH_HOST_PATHS__`）和原生拖放不在 CI 范围内。
 
@@ -61,6 +65,8 @@ Host peer 对每个已发布的元组各用一个带预发布标记的比较器�
 | 0.1.6-alpha.1、alpha.2 | 成功 | 通过 | 通过（9）；338/338 | 通过；401 |
 | 0.1.7-alpha.1、alpha.2（npm `alpha`）、rc.1 | 成功 | 通过 | 通过（9）；338/338 | 通过；401 |
 | **0.1.7-rc.2**——开发 pin、npm `next`、桌面应用 | 成功 | 通过；另有 build、`check`、`check:dist` | 通过（9）；338/338 | npm 与桌面应用运行时（Electron Node 24.18.1、自带 pnpm 11.7.0）上均通过；401 |
+
+**不要在按发布时安装的 0.0.1-rc.5 – 0.1.0-rc.7 上使用 v0.2.0。** 它在这些序列上能安装、激活、路由应答并被服务端提供——vm 层面的各项都通过——但这些输入框没有附件席位，而它挂在 document 上的捕获阶段监听仍会接管每一次拖放和粘贴：拖到输入框上的每个文件（图片也一样）都被吞掉，并提示「请先打开一个会话再拖入文件」，输入框自己的图片拖放从不执行（已在 0.1.0-rc.6 上实测复现）。0.3.0 为这些输入框提供了自己的附件栏。发现这个问题的正是 `client-drop` 这一项。
 
 0.0.1-rc.5 与 0.1.0-rc.2 – rc.7 上的 6 个类型错误完全相同：这些序列的 slot 表里没有 `conversation.input.attachments`（`src/client/DropRail.tsx:228`、`src/client/rail-entry.ts:91` 两处），席位 props 里没有 `useInput` / `inputActions`（`DropRail.tsx:461` 两处），`inject` 工厂的 `sessionId` 失去类型（`rail-entry.ts:105`）。它们只发生在编译期——构建出的产物在每个序列上都相同，并且在每个序列上都能启动——但在客户端半边能按这些序列的声明编译通过之前，每周扫描和发版门禁都会判这五行失败。
 
