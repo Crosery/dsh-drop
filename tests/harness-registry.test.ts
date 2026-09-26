@@ -192,12 +192,18 @@ test('only a train npm really lacks is incomplete, and pinned and floor never ar
     assert.match(floor.stderr, /published in full/, cell)
   }
   // The one train npm has is repointed, with every other devDependency held at the lockfile.
+  // (This suite also runs inside repointed cells, so the input manifest may already be on a train.)
+  type Manifest = { devDependencies: Record<string, string> }
+  const input = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as Manifest
   const lock = JSON.parse(readFileSync(join(dir, 'package-lock.json'), 'utf8')) as { packages: Record<string, { version: string }> }
   const repointed = await exec(registries['one-train'], dir, ['scripts/harness-target.mjs', '0.1.7-rc.2', '--repoint'])
   assert.equal(repointed.code, 0, repointed.stdout + repointed.stderr)
-  const { devDependencies } = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as { devDependencies: Record<string, string> }
+  const { devDependencies } = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as Manifest
   for (const [name, spec] of Object.entries(devDependencies)) {
-    assert.equal(spec, name.startsWith('@deepseek-ai/dsh-') ? '0.1.7-rc.2' : lock.packages[`node_modules/${name}`]!.version, name)
+    const expected = !name.startsWith('@deepseek-ai/') ? lock.packages[`node_modules/${name}`]!.version
+      : name.startsWith('@deepseek-ai/dsh-') && name !== '@deepseek-ai/dsh-client-runtime' ? '0.1.7-rc.2'
+        : input.devDependencies[name]
+    assert.equal(spec, expected, name)
   }
   rmSync(join(dir, 'package-lock.json'))
   const unlocked = await exec(registries['one-train'], dir, ['scripts/harness-target.mjs', '0.1.7-rc.2', '--repoint'])

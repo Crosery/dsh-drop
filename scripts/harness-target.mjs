@@ -180,9 +180,12 @@ async function target(cell) {
       out('missing', missing)
       throw incomplete(`not published at ${version}, and this plugin needs it: ${missing}`)
     }
-    if (repointed.kept.length > 0) summary(`- not published at ${version}, keeps this repository's pin: ${repointed.kept.join(', ')}`)
-    if (repointed.added.length > 0) summary(`- added at ${version}: ${repointed.added.join(', ')}`)
-    if (repointed.locked.length > 0) summary(`- other devDependencies pinned at package-lock.json: ${repointed.locked.join(', ')}`)
+    // Noted once, by the step that repoints; the install step repeats the plan only to install it.
+    if (flags.repoint) {
+      if (repointed.kept.length > 0) summary(`- not published at ${version}, keeps this repository's pin: ${repointed.kept.join(', ')}`)
+      if (repointed.added.length > 0) summary(`- added at ${version}: ${repointed.added.join(', ')}`)
+      if (repointed.locked.length > 0) summary(`- other devDependencies pinned at package-lock.json: ${repointed.locked.join(', ')}`)
+    }
     manifest = repointed.manifest
     writeFileSync(pkgPath, JSON.stringify(manifest, null, 2) + '\n')
   }
