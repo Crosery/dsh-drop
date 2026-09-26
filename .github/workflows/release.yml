@@ -15,8 +15,11 @@ on:
         description: Existing version tag to publish
         required: true
         type: string
+# Read-only by default: only the job that creates the release may write, and
+# no secret or token is set above the one step that uses it. The tag reaches
+# shell steps only as $RELEASE_TAG, never interpolated into a script.
 permissions:
-  contents: write
+  contents: read
 jobs:
   gate:
     # `issues: write` is declared by the called workflow; `report` is off, so
@@ -34,12 +37,15 @@ jobs:
   release:
     needs: gate
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     env:
       RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag || github.ref }}
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
