@@ -1,7 +1,7 @@
 {
   "name": "@crosery/dsh-drop",
   "version": "0.2.0",
-  "description": "Drag and paste files into dsh Web with a unified preview rail; keep native images and add file references only when sending.",
+  "description": "Drag and paste files and folders into DeepSeek Harness, on the web and in the desktop app, with one preview rail; file references are added when you send.",
   "keywords": [
     "dsh",
     "dsh-plugin",
