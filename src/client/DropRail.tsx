@@ -52,6 +52,7 @@ import { ChevronLeftGlyph, ChevronRightGlyph, CloseGlyph, FolderGlyph, PlayGlyph
 import { DROP_NS, type DropKey } from './locales.ts'
 import type { DropAsset } from './preview-store.ts'
 import type { RailRecord } from './registry.ts'
+import { planRemovalFocus, settleRemovalFocus, type PendingFocus } from './rail-focus.ts'
 import { useRailOverflow } from './use-rail-overflow.ts'
 
 /** What a card shows: a file's medium, or a folder. */
@@ -344,10 +345,11 @@ function statusOf(item: RailItem, t: DropRailProps['t']): string {
  * @param props - the item, its preview URL, the open callback, the translator.
  * @returns the card and its controls.
  */
-function Card({ item, url, onOpen, t }: {
+function Card({ item, url, onOpen, onRemove, t }: {
   item: RailItem
   url: string | undefined
   onOpen: () => void
+  onRemove: () => void
   t: DropRailProps['t']
 }): ReactNode {
   const size = item.row === 'seat' ? item.size : item.entry.size ?? item.asset?.size ?? 0
@@ -368,6 +370,7 @@ function Card({ item, url, onOpen, t }: {
   return (
     <div
       className="dshdrop-item"
+      data-dshdrop-key={item.key}
       data-state={failed ? 'error' : busy ? 'busy' : undefined}
       data-kind={folder ? 'folder' : undefined}
       aria-busy={busy || undefined}
@@ -423,7 +426,7 @@ function Card({ item, url, onOpen, t }: {
         type="button"
         className="dshdrop-remove"
         aria-label={t('action.remove', { name: label })}
-        onClick={item.remove}
+        onClick={onRemove}
       >
         <CloseGlyph size={10} />
       </button>
@@ -601,6 +604,41 @@ export function DropRail(props: DropRailProps): ReactNode {
     if (open !== null && previewed === null) setOpen(null)
   }, [open, previewed])
 
+  // Removing a card removes its focused remove control with it, and the
+  // browser would drop focus to <body>. Focus moves to the neighbouring card
+  // instead, or back to the composer's input once the rail is empty — only
+  // when the press came from inside the rail, and only once the card's owner
+  // has actually removed it (see `rail-focus.ts`).
+  const wrapRef = useRef<HTMLDivElement | null>(null)
+  const pendingFocus = useRef<PendingFocus | null>(null)
+  const removeItem = (item: RailItem): void => {
+    const active = document.activeElement
+    if (active !== null && wrapRef.current?.contains(active) === true) {
+      pendingFocus.current = planRemovalFocus(items.map((one) => one.key), item.key)
+    }
+    item.remove()
+  }
+  useEffect(() => {
+    const pending = pendingFocus.current
+    if (pending === null) return
+    const wrap = wrapRef.current
+    const active = document.activeElement
+    const focus = active === null || active === document.body
+      ? 'lost'
+      : wrap?.contains(active) === true ? 'rail' : 'elsewhere'
+    const decision = settleRemovalFocus(pending, items.map((one) => one.key), focus)
+    if (decision === 'wait') return
+    pendingFocus.current = null
+    if (decision === 'drop') return
+    const target = decision === 'composer'
+      ? anchorRef.current?.closest('[data-composer-card]')
+        ?.querySelector<HTMLElement>('[data-composer-input], textarea')
+      : Array.from(wrap?.querySelectorAll<HTMLElement>('[data-dshdrop-key]') ?? [])
+        .find((card) => card.dataset.dshdropKey === decision.card)
+        ?.querySelector<HTMLElement>('.dshdrop-remove')
+    target?.focus()
+  }, [items])
+
   const previewKey = previewed === null || previewed.kind !== 'text'
     ? null
     : previewed.row === 'staged' ? previewed.entry.key : previewed.assetKey ?? null
@@ -622,7 +660,7 @@ export function DropRail(props: DropRailProps): ReactNode {
   }
 
   return (
-    <div className="dshdrop-rail-wrap">
+    <div className="dshdrop-rail-wrap" ref={wrapRef}>
       {anchor}
       <div className="dshdrop-rail" ref={overflow.ref} role="group" aria-label={t('rail.label')}>
         {items.map((item) => (
@@ -631,6 +669,7 @@ export function DropRail(props: DropRailProps): ReactNode {
             item={item}
             url={item.row === 'seat' ? item.url : item.asset?.url}
             onOpen={() => { setOpen(item.key) }}
+            onRemove={() => { removeItem(item) }}
             t={t}
           />
         ))}
