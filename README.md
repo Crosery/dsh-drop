@@ -14,7 +14,7 @@ Drag or paste files into **DeepSeek Harness** — the Web app and the desktop ap
 
 | Where | Supported | Verified |
 | --- | --- | --- |
-| **Web** (`dsh --profile web`) | **0.1.0-rc.8 through 0.1.7-rc.2** | Every published version in that span typechecks, passes the tests and is admitted by the peer ranges. The packed plugin boots — installed with `dsh plugin add`, activated, its routes answering, its browser half served — on the 0.1.1-rc.2 floor, on 0.1.7-rc.2 (npm `next`) and on the newest build of every other tuple, npm `latest` 0.1.5-rc.3 included. |
+| **Web** (`dsh --profile web`) | **0.0.1-rc.5 through 0.1.7-rc.2** — every published version that installs | The peer ranges admit every published version. CI installs the packed plugin into each one with `dsh plugin add` and runs it — activated, its routes answering, its browser half served — and typechecks and tests it against that version's own packages. 0.0.1-rc.1 and rc.2 are admitted too, but `@deepseek-ai/dsh` itself cannot be installed at those versions: it depends on `@deepseek-ai/dsh-agent-tool-mode`, which npm has never had. |
 | **Desktop app** | **0.1.7-rc.2** | The same boot smoke on the app's own runtime, the version its update feeds ship. The app's window and native drag-and-drop are not driven by CI. |
 
 From 0.1.7 DSH refuses to install, and skips at boot, a plugin whose peer ranges do not admit it — releases before 0.2.0 do not load there. A newer harness is admitted only after CI has verified it; the per-version evidence is in [Harness compatibility](docs/harness-compatibility.md).

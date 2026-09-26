@@ -51,12 +51,13 @@ const PUBLISHED = [
 ]
 
 test('the sweep starts at the lowest version every harness peer admits', () => {
-  assert.equal(sweepStart(peers), '0.1.0-rc.8')
+  assert.equal(sweepStart(peers), '0.0.1-rc.0')
   assert.deepEqual(sweepStart([['a', '>=0.1.1-rc.0 <0.1.2-0'], ['b', '>=0.1.0-rc.8 <0.1.2-0']]), '0.1.1-rc.0')
 })
 
 test('admission applies both semver rules and names the one that refused', () => {
-  for (const version of ['0.1.1-rc.2', '0.1.5-rc.3', '0.1.7-rc.2', '0.1.7-alpha.2']) assert.deepEqual(refusals(version, peers), [], version)
+  // Every published harness version is admitted: CI installs the plugin into each one and runs it.
+  for (const version of PUBLISHED) assert.deepEqual(refusals(version, peers), [], version)
   // A wildcard admits a prerelease only when prereleases are included.
   const wide = refusals('0.1.7-rc.2', [['@deepseek-ai/dsh-x', '0.1.x']])
   assert.deepEqual(wide, [{ name: '@deepseek-ai/dsh-x', runtime: true, installer: false }])
@@ -65,8 +66,8 @@ test('admission applies both semver rules and names the one that refused', () =>
   // The released v0.1.3 ranges stopped at 0.1.6: the 0.1.7 runtime refuses it.
   const old = refusals('0.1.7-rc.2', [['@deepseek-ai/dsh-settings', '>=0.1.1-rc.0 <0.1.2-0 || >=0.1.5-alpha.0 <0.1.6-0']])
   assert.deepEqual(old, [{ name: '@deepseek-ai/dsh-settings', runtime: false, installer: false }])
-  // The next tuple is admitted only after a sweep verified it.
-  assert.equal(refusals('0.1.8-alpha.0', peers).length, peers.length)
+  // The next tuple is admitted only after a sweep verified it; so is 0.1.4, never published.
+  for (const version of ['0.1.8-alpha.0', '0.1.4-alpha.0', '0.0.2-alpha.0']) assert.equal(refusals(version, peers).length, peers.length, version)
 })
 
 test('each tuple head is its newest prerelease', () => {
