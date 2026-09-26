@@ -201,6 +201,29 @@ function harnessTimes() {
   return JSON.parse(run('npm', ['view', '@deepseek-ai/dsh', 'time', '--json']).stdout)
 }
 
+/**
+ * A directory of shims that answer "where is Documents" with this run's home.
+ * 0.1.7 asks `osascript` on macOS and `xdg-user-dir` on Linux rather than
+ * reading HOME, so without them the smoke would create
+ * `~/Documents/deepseek-harness/default-workspace` in the real account. Any
+ * other use goes through to the real command.
+ * @returns the directory to put first on the boot's PATH.
+ */
+function documentsShims(userHome) {
+  const bin = join(work, 'shims')
+  mkdirSync(bin, { recursive: true })
+  const real = (name) => spawnSync('sh', ['-c', `command -v ${name}`], { encoding: 'utf8', env }).stdout.trim()
+  const shim = (name, test, fallback) => writeFileSync(join(bin, name), [
+    '#!/bin/sh',
+    `case "$*" in ${test}) printf '%s\\n' ${JSON.stringify(join(userHome, 'Documents'))}; exit 0 ;; esac`,
+    fallback === '' ? 'exit 1' : `exec ${JSON.stringify(fallback)} "$@"`,
+    '',
+  ].join('\n'), { mode: 0o755 })
+  shim('osascript', '*"path to documents folder"*', real('osascript'))
+  shim('xdg-user-dir', 'DOCUMENTS', real('xdg-user-dir'))
+  return bin
+}
+
 /** An empty project to install the harness into. */
 function freshProject(dir) {
   rmSync(dir, { recursive: true, force: true })
@@ -616,14 +639,15 @@ try {
 
   // 5. Boot the Web profile and wait for the URL line — printed only after the
   //    loader settled and the startup audit ran.
-  //    Its HOME is a directory of this run: 0.1.7 creates the default
-  //    workspace under ~/Documents on first page load, and the workspace picker
-  //    of the trains without one opens at home. SSH_CONNECTION makes that
-  //    picker the in-page one (a native dialog would need a desktop session).
+  //    Its home is a directory of this run: 0.1.7 creates its default
+  //    workspace under the account's Documents on first page load, and the
+  //    workspace picker of the trains without one opens at home.
+  //    SSH_CONNECTION makes that picker the in-page one (a native dialog
+  //    would need a desktop session).
   const port = await freePort()
   const userHome = join(work, 'user-home')
-  mkdirSync(userHome, { recursive: true })
-  const bootEnv = { ...env, HOME: userHome, SSH_CONNECTION: '127.0.0.1 0 127.0.0.1 0' }
+  mkdirSync(join(userHome, 'Documents'), { recursive: true })
+  const bootEnv = { ...env, HOME: userHome, SSH_CONNECTION: '127.0.0.1 0 127.0.0.1 0', PATH: `${documentsShims(userHome)}${delimiter}${env.PATH}` }
   child = spawn(process.execPath, [dshBin, '--profile', 'web', ...noOpenFlag(dshBin, env), '--host', '127.0.0.1', '--port', String(port)], {
     env: bootEnv, stdio: ['ignore', 'pipe', 'pipe'], detached: true,
   })
