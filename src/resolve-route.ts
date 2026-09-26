@@ -190,7 +190,8 @@ export async function summarizeDirectory(root: string, rules: FolderRules): Prom
 /**
  * Check a folder claim and, when it holds, count the folder.
  *
- * Every sampled file must be distinct, a regular file (not a link), resolve
+ * Every sampled file must be a distinct file (not merely a distinct spelling
+ * of one), a regular file (not a link), resolve
  * inside the claimed directory, and match its claimed size and mtime. An
  * empty sample claims an empty folder, so the directory may hold nothing but
  * ignored names. And the sample must be as large as the folder allows: a
@@ -212,12 +213,18 @@ export async function claimDirectory(
   for (const claim of sample) {
     const segments = safeRelativeSegments(claim.path, { maxDepth: rules.maxDepth, win32: rules.win32 })
     if (segments === undefined) return undefined
-    const key = segments.join('/')
+    const target = join(path, ...segments)
+    const file = await lstat(target, { bigint: true })
+    if (!file.isFile()) return undefined
+    if (!claimMatches({ size: Number(file.size), mtimeMs: Number(file.mtimeNs) / 1e6 }, claim)) return undefined
+    // Distinct files, not distinct spellings: on a case- or
+    // normalization-insensitive volume (APFS, NTFS) `readme.md` and
+    // `README.md` are one file, as is a path through a link back into the
+    // folder. The inode says so where the path cannot; a volume that reports
+    // none keeps the path as the key.
+    const key = file.ino === 0n ? `path:${segments.join('/')}` : `${file.dev}:${file.ino}`
     if (seen.has(key)) return undefined
     seen.add(key)
-    const target = join(path, ...segments)
-    const file = await lstat(target)
-    if (!file.isFile() || !claimMatches(file, claim)) return undefined
     // A link in the middle of the path could lead anywhere; the file has to
     // really live inside the folder.
     if (!insideRoot(real, await realpath(target))) return undefined

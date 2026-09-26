@@ -72,7 +72,8 @@ export declare function summarizeDirectory(root: string, rules: FolderRules): Pr
 /**
  * Check a folder claim and, when it holds, count the folder.
  *
- * Every sampled file must be distinct, a regular file (not a link), resolve
+ * Every sampled file must be a distinct file (not merely a distinct spelling
+ * of one), a regular file (not a link), resolve
  * inside the claimed directory, and match its claimed size and mtime. An
  * empty sample claims an empty folder, so the directory may hold nothing but
  * ignored names. And the sample must be as large as the folder allows: a

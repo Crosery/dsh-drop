@@ -11,7 +11,7 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, it } from 'node:test'
 import { createServer, type Server } from 'node:http'
-import { mkdir, mkdtemp, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { access, link, mkdir, mkdtemp, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { AddressInfo } from 'node:net'
@@ -109,6 +109,38 @@ describe('resolve route, folder claims', () => {
   it('refuses a sample that repeats one file to look larger', async () => {
     const one = await describeFile(many, 'f0.txt')
     assert.equal((await post(many, Array.from({ length: FOLDER_SAMPLE_SIZE }, () => one))).status, 404)
+  })
+
+  it('refuses a sample that names one file twice under different spellings', async () => {
+    // A hard link is the portable case of one file with two names; a path
+    // through a link back into the folder is another.
+    const aliased = join(base, 'aliased')
+    await mkdir(aliased)
+    for (let index = 0; index < 12; index += 1) await writeFile(join(aliased, `secret-${index}.txt`), String(index))
+    await writeFile(join(aliased, 'known.md'), 'known')
+    await link(join(aliased, 'known.md'), join(aliased, 'alias.md'))
+    await symlink(aliased, join(aliased, 'back'))
+    const known = await describeFile(aliased, 'known.md')
+    const spellings = Array.from({ length: FOLDER_SAMPLE_SIZE / 2 }, (_, depth) => 'back/'.repeat(depth))
+      .flatMap((prefix) => [`${prefix}known.md`, `${prefix}alias.md`])
+    assert.equal(new Set(spellings).size, FOLDER_SAMPLE_SIZE, 'as many distinct spellings as a full sample')
+    assert.equal((await post(aliased, spellings.map((path) => ({ ...known, path })))).status, 404)
+  })
+
+  it('refuses case variants of one file on a case-insensitive volume', async (t) => {
+    const folded = join(base, 'folded')
+    await mkdir(folded)
+    for (let index = 0; index < 50; index += 1) await writeFile(join(folded, `secret-${index}.txt`), String(index))
+    await writeFile(join(folded, 'readme.md'), 'hello')
+    try {
+      await access(join(folded, 'README.md'))
+    } catch {
+      t.skip('this volume is case-sensitive: the variants do not exist')
+      return
+    }
+    const known = await describeFile(folded, 'readme.md')
+    const variants = ['readme.md', 'README.md', 'Readme.md', 'rEadme.md', 'reAdme.md', 'reaDme.md', 'readMe.md', 'readmE.md']
+    assert.equal((await post(folded, variants.map((path) => ({ ...known, path })))).status, 404)
   })
 
   it('refuses a sample larger than the protocol allows', async () => {
