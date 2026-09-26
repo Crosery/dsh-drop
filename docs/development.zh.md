@@ -38,7 +38,7 @@ resolve 路由上的文件夹声明用最多八个文件（相对路径、大小
 
 ## 验证
 
-运行 npm run typecheck、npm test、npm run build、npm run check、npm run check:dist。Host 测试使用真实 HTTP 和临时目录；发送拦截在 `tests/submit-flow.test.ts` 中以小型文档模型验证。两半边分开 typecheck；测试可以包含 DOM 类型，但不能同时拉入相冲突的 Context 增强。新增行为补能在旧实现上失败的回归。UI 修改要在已有 DSH URL 刷新后用合成文件验证：纯图片、混合拖放、粘贴、移除（焦点落到相邻卡片，附件栏清空时回到输入框）、文本/PDF 预览、灯箱键盘焦点、窄栏（出现后变宽的卡片也会让箭头跟着出现）、纯文件 Enter；文件夹则用 CDP `Input.dispatchDragEvent` 拖入真实文件夹（`data.files` 可以是目录路径）、打桩的 `__DSH_HOST_PATHS__`、超限文件夹，以及在 `Network.emulateNetworkConditions` 限速下上传中途移除。截图不能暴露真实文档和会话历史。仅记录实际跑过的验证。
+按顺序运行 npm run typecheck、npm test、npm run check:dist、npm run build、npm run check：check:dist 用临时构建比对已提交的 `lib/`，先构建会把差异掩盖掉。Host 测试使用真实 HTTP 和临时目录；发送拦截在 `tests/submit-flow.test.ts` 中以小型文档模型验证。两半边分开 typecheck；测试可以包含 DOM 类型，但不能同时拉入相冲突的 Context 增强。新增行为补能在旧实现上失败的回归。UI 修改要在已有 DSH URL 刷新后用合成文件验证：纯图片、混合拖放、粘贴、移除（焦点落到相邻卡片，附件栏清空时回到输入框）、文本/PDF 预览、灯箱键盘焦点、窄栏（出现后变宽的卡片也会让箭头跟着出现）、纯文件 Enter；文件夹则用 CDP `Input.dispatchDragEvent` 拖入真实文件夹（`data.files` 可以是目录路径）、打桩的 `__DSH_HOST_PATHS__`、超限文件夹，以及在 `Network.emulateNetworkConditions` 限速下上传中途移除。截图不能暴露真实文档和会话历史。仅记录实际跑过的验证。
 
 任何客户端改动都必须对全部已发布序列通过类型检查和测试，而不只是 pin 的那一个：`node scripts/sweep-trains.mjs` 为每个序列复制一份树，用与 CI 各格相同的 `scripts/harness-target.mjs --repoint --install` 切到该精确版本，再运行 typecheck、产物的 harness 模块成员检查（`check-dist.mjs --bundle-only`）和测试（见 docs/harness-compatibility.zh.md）。改动 Host 路由、清单或产物时还要跑 `node scripts/smoke-boot.mjs --dsh <版本>`：它在一次性 home 里用 `dsh plugin add` 安装打包后的插件，启动 `dsh --profile web`，检查激活、三条路由（0.1.2 起无登录 cookie 返回 401，并实际暂存与解析一次）以及按 shell 模块表和该序列导出评估的浏览器产物。`lib/` 已入库，因此源码改动要跟着跑 npm run build 并提交重新生成的产物，否则 check:dist 会红。
 

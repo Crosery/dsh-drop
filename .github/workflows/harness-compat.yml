@@ -92,6 +92,10 @@ on:
         description: 'Ref to test; the caller''s ref when empty'
         type: string
         default: ''
+      tarball:
+        description: 'An artifact of this run holding dsh-drop.tgz: every smoke installs that file instead of packing the checkout, so a release smokes the very file it ships'
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -162,8 +166,8 @@ jobs:
     needs: plan
     name: harness@${{ matrix.cell }}
     runs-on: ubuntu-latest
-    # The sum of the step timeouts below (125), plus margin for the post steps.
-    timeout-minutes: 140
+    # The sum of the step timeouts below (130), plus margin for the post steps.
+    timeout-minutes: 145
     # Only the verdict writes issues, and only when reporting. A caller must
     # grant this too: a called workflow cannot hold more than its caller gives.
     permissions:
@@ -246,6 +250,14 @@ jobs:
           VERSION: ${{ steps.target.outputs.version }}
         run: node scripts/harness-target.mjs "$VERSION" --admits
 
+      - name: Fetch the tarball under test
+        if: inputs.tarball != '' && matrix.smoke && steps.target.outputs.incomplete != 'true' && steps.install.outputs.incomplete != 'true'
+        timeout-minutes: 5
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.tarball }}
+          path: ${{ runner.temp }}/under-test
+
       - name: Boot smoke
         id: smoke
         if: matrix.smoke && steps.target.outputs.incomplete != 'true' && steps.install.outputs.incomplete != 'true'
@@ -253,11 +265,14 @@ jobs:
         timeout-minutes: 30
         env:
           VERSION: ${{ steps.target.outputs.version }}
+          TARBALL: ${{ inputs.tarball != '' && format('{0}/under-test/dsh-drop.tgz', runner.temp) || '' }}
           SMOKE_RESULT: ${{ runner.temp }}/smoke.jsonl
         run: |
           # Never pack a repointed manifest: the smoke installs what a user gets.
           git checkout -- package.json package-lock.json
-          node scripts/smoke-boot.mjs --dsh "$VERSION"
+          args=(--dsh "$VERSION")
+          if [ -n "$TARBALL" ]; then args+=(--tarball "$TARBALL"); fi
+          node scripts/smoke-boot.mjs "${args[@]}"
 
       - if: always() && steps.target.outputs.version != ''
         timeout-minutes: 5
@@ -299,8 +314,8 @@ jobs:
     if: github.event_name == 'schedule' || inputs.desktop-bytes
     name: harness@desktop-bytes
     runs-on: macos-latest
-    # The sum of the step timeouts below (110), plus margin for the cache's post step.
-    timeout-minutes: 125
+    # The sum of the step timeouts below (115), plus margin for the cache's post step.
+    timeout-minutes: 130
     permissions:
       contents: read
       issues: write
@@ -373,6 +388,14 @@ jobs:
             if (r.release.version !== feed || dsh !== feed) { console.error("::error::the app bundles " + dsh + " (" + r.release.version + ") but its feed announces " + feed); process.exit(1) }
           ' "$RES/app.asar/dsh" "$VERSION"
 
+      - name: Fetch the tarball under test
+        if: inputs.tarball != ''
+        timeout-minutes: 5
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.tarball }}
+          path: ${{ runner.temp }}/under-test
+
       - name: Boot smoke on the desktop runtime
         id: smoke
         continue-on-error: true
@@ -381,6 +404,7 @@ jobs:
           EXE: ${{ steps.runtime.outputs.exe }}
           HARNESS: ${{ steps.runtime.outputs.harness }}
           PNPM_MJS: ${{ steps.runtime.outputs.pnpm }}
+          TARBALL: ${{ inputs.tarball != '' && format('{0}/under-test/dsh-drop.tgz', runner.temp) || '' }}
           SMOKE_RESULT: ${{ runner.temp }}/smoke.jsonl
         run: |
           # `dsh plugin` runs whatever pnpm is on PATH: make that the app's own.
@@ -388,7 +412,9 @@ jobs:
           printf '#!/bin/sh\nELECTRON_RUN_AS_NODE=1 exec "%s" "%s" "$@"\n' "$EXE" "$PNPM_MJS" > "$RUNNER_TEMP/bin/pnpm"
           chmod +x "$RUNNER_TEMP/bin/pnpm"
           export PATH="$RUNNER_TEMP/bin:$PATH"
-          ELECTRON_RUN_AS_NODE=1 "$EXE" scripts/smoke-boot.mjs --harness-dir "$HARNESS"
+          args=(--harness-dir "$HARNESS")
+          if [ -n "$TARBALL" ]; then args+=(--tarball "$TARBALL"); fi
+          ELECTRON_RUN_AS_NODE=1 "$EXE" scripts/smoke-boot.mjs "${args[@]}"
 
       - if: always()
         timeout-minutes: 5

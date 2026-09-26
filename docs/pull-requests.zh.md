@@ -12,7 +12,7 @@
 
 | 检查 | 是否必需 | 内容 |
 | --- | --- | --- |
-| `node 22.19`、`node 24` | 是 | `npm ci`、类型检查、测试、构建、`check`、`check:dist` |
+| `node 22.19`、`node 24` | 是 | `npm ci`、类型检查、测试、`check:dist`（用临时构建比对已提交的 `lib/`）、构建（不得改动已提交的树）、`check` |
 | `harness / harness@pinned` | 是 | 在固定开发序列（0.1.7-rc.2）上跑四项 harness 检查 |
 | `harness / harness@floor` | 是 | 在 0.1.1-rc.2 地板上跑同样四项，所有 `@deepseek-ai/dsh-*` 开发依赖改指向该版本 |
 | `desktop / harness@desktop` | 否 | 在桌面应用更新 feed 当前发布的版本上跑同样四项；feed 会在 PR 打开期间变化，这个信号归定时任务负责 |

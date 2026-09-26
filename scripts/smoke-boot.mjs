@@ -56,12 +56,14 @@
  *                           first, to separate "peer range too narrow" from
  *                           "code broken". Never a gate.
  *
- * Appends one JSON line to $SMOKE_RESULT and a section to $GITHUB_STEP_SUMMARY.
+ * Appends one JSON line to $SMOKE_RESULT (with the installed tarball's sha256)
+ * and a section to $GITHUB_STEP_SUMMARY.
  * Exit 0 passed, 1 failed.
  */
 
 import assert from 'node:assert/strict'
 import { spawn, spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { createServer } from 'node:net'
@@ -340,6 +342,8 @@ try {
     tarball = join(work, packed.filename)
   }
   result.tarball = tarball.startsWith(work) ? 'packed from the checkout' : tarball
+  // What was installed, byte for byte: a release attaches only the file its gate smoked.
+  result.sha256 = createHash('sha256').update(readFileSync(tarball)).digest('hex')
   if (values.tarball !== undefined) {
     // Another build of the plugin (an old release, say): name, version and
     // inject list come from it, so an --accept-risk exemption names it.

@@ -99,7 +99,7 @@ Host peer 对每个支持的元组各用一个带预发布标记的比较器：`
 
 ## 产物入库
 
-`lib/` 提交进仓库，并由 `.gitignore` 保持。仓库没有 npm 包时，插件市场的降级通道就是 git 安装，而 pnpm 默认拒绝执行 git 托管包的构建脚本，除非用户在 profile 的 `allowBuilds` 里预先放行——因此在安装期构建的插件，对相当一部分用户等于装不上。`npm run check:dist` 会把源码构建到临时目录并拒绝与 `src/` 不一致的已提交产物；CI 在两个 Node 主版本上都跑这一步。
+`lib/` 提交进仓库，并由 `.gitignore` 保持。仓库没有 npm 包时，插件市场的降级通道就是 git 安装，而 pnpm 默认拒绝执行 git 托管包的构建脚本，除非用户在 profile 的 `allowBuilds` 里预先放行——因此在安装期构建的插件，对相当一部分用户等于装不上。`npm run check:dist` 会把源码构建到临时目录并拒绝与 `src/` 不一致的已提交产物；CI 在两个 Node 主版本上跑这一步，发版在打包前跑，都在任何原地重建 `lib/` 之前；`npm run build` 改动已提交的树时两者都会失败。
 
 每日与每周的组合负责发现上游漂移，修复仍需人工：先读新版本的公开声明，运行 `node scripts/smoke-boot.mjs --dsh <版本> --accept-risk`（诊断用，先授予精确版本豁免，以区分「范围太窄」和「代码坏了」），pin 需要移动时同步更新相关 DSH pin，重新生成 package-lock.json，运行扫描、构建、产物一致性检查，再实测 Web 与桌面的输入框。只有类型检查、测试和上述冒烟都通过后才放宽范围，并把该版本加入 `scripts/check-invariants.mjs` 的 `VERIFIED_TRAINS` 和上表。single 附件席位、输入 phase/actions、捕获提交选择器和 UI-primitives 基线尤其敏感。
 

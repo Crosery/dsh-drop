@@ -121,12 +121,12 @@ SVG 留在图片元素，HTML 只展示转义源码，PDF blob 强制 applicatio
 npm ci
 npm run typecheck
 npm test
+npm run check:dist
 npm run build
 npm run check
-npm run check:dist
 ~~~
 
-仓库自足，依赖公开 pin 版本，不要求兄弟 checkout。[AGENTS.md](AGENTS.md) 路由到[双语开发、PR、发版与兼容规范](docs/README.zh.md)。CI 在 Node 22.19 和 24 上跑以上门禁，另跑两个 harness 组合——固定的 0.1.7-rc.2 开发序列和 0.1.1-rc.2 地板——每格都做类型检查、测试、peer 准入和打包插件的启动冒烟；第三格跟随桌面应用的版本。Harness compatibility 工作流每天对桌面应用 feed 与 npm `latest` / `next` / `alpha` 运行，每周扫描全部已发布的 harness 版本，并在 macOS 上对桌面应用本体运行。发版必须先通过这道门禁。
+仓库自足，依赖公开 pin 版本，不要求兄弟 checkout。[AGENTS.md](AGENTS.md) 路由到[双语开发、PR、发版与兼容规范](docs/README.zh.md)。CI 在 Node 22.19 和 24 上按此顺序跑以上门禁——`check:dist` 在 `npm run build` 重写 `lib/` 之前用临时构建比对已提交的产物，构建后树必须保持不变——另跑两个 harness 组合——固定的 0.1.7-rc.2 开发序列和 0.1.1-rc.2 地板——每格都做类型检查、测试、peer 准入和打包插件的启动冒烟；第三格跟随桌面应用的版本。Harness compatibility 工作流每天对桌面应用 feed 与 npm `latest` / `next` / `alpha` 运行，每周扫描全部已发布的 harness 版本，并在 macOS 上对桌面应用本体运行。发版必须先通过这道门禁。
 
 ## 许可
 

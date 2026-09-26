@@ -93,16 +93,29 @@ for (const file of ['CHANGELOG.md','CHANGELOG.zh.md']) {
 
 // CI wiring the compatibility claims rest on: pull requests gate on the pinned
 // train and the floor, the desktop cell runs beside them, and a release is
-// gated on those plus the desktop bytes and the full sweep.
+// gated on those plus the desktop bytes and the full sweep — smoking the very
+// tarball it then attaches. The committed dist is compared with a scratch
+// build before anything rebuilds lib/ in place.
 const ci = read('.github/workflows/ci.yml')
 const release = read('.github/workflows/release.yml')
 const compat = read('.github/workflows/harness-compat.yml')
 assert.match(ci, /uses: \.\/\.github\/workflows\/harness-compat\.yml\s+with:\s+cells: pinned,floor/, 'ci.yml must gate on the pinned and floor cells')
 assert.match(ci, /cells: desktop\b/, 'ci.yml must run the desktop cell')
-assert.match(release, /needs: gate/, 'release.yml must wait for its gate')
+for (const [file, text] of [['ci.yml', ci], ['release.yml', release]]) {
+  const command = (name) => new RegExp(`^\\s*(?:- run: )?npm run ${name}\\s*$`, 'm').exec(text)?.index ?? -1
+  const dist = command('check:dist')
+  const build = command('build')
+  assert.ok(dist >= 0 && build > dist, `${file} must run check:dist before npm run build rewrites lib/`)
+  assert.match(text.slice(build), /git status --porcelain/, `${file} must refuse a build that changes the committed tree`)
+}
+assert.match(release, /gate:\s+needs: pack\b/, 'release.yml must pack before its gate')
+assert.match(release, /needs: \[pack, gate\]/, 'release.yml must wait for its gate')
 assert.match(release, /cells: pinned,floor,desktop,sweep/, 'the release gate must cover pinned, floor, desktop and the sweep')
 assert.match(release, /desktop-bytes: true/, 'the release gate must smoke the desktop bytes')
+assert.match(release, /tarball: release-asset/, 'the release gate must smoke the packed asset, not a fresh pack of the tree')
+assert.match(release, /r\.sha256 !== asset/, 'the release must refuse an asset whose bytes the gate did not smoke')
 assert.match(release, /dsh-drop\.tgz SHA256SUMS/, 'a release attaches dsh-drop.tgz and SHA256SUMS')
+assert.match(compat, /--tarball "\$TARBALL"/, 'harness-compat.yml must smoke the tarball it is given')
 for (const stage of ['smoke-boot.mjs', 'check-dist.mjs --bundle-only', '--admits', 'harness-verdict.cjs', 'desktop-bytes']) assert.ok(compat.includes(stage), 'harness-compat.yml lost ' + stage)
 const shots = JSON.parse(read('screenshots.json'))
 assert.ok(Array.isArray(shots) && shots.length >= 1 && shots.length <= 8)

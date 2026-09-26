@@ -12,7 +12,7 @@ Required gates: separate typechecks, tests, build, client module-table purity an
 
 | Check | Required | What it runs |
 | --- | --- | --- |
-| `node 22.19`, `node 24` | yes | `npm ci`, typecheck, tests, build, `check`, `check:dist` |
+| `node 22.19`, `node 24` | yes | `npm ci`, typecheck, tests, `check:dist` (the committed `lib/` against a scratch build), build (which must leave the tree unchanged), `check` |
 | `harness / harness@pinned` | yes | the four harness stages on the pinned train (0.1.7-rc.2) |
 | `harness / harness@floor` | yes | the same on the 0.1.1-rc.2 floor, with every `@deepseek-ai/dsh-*` devDependency repointed |
 | `desktop / harness@desktop` | no | the same on the version the desktop app's update feeds ship today; the feed moves under open PRs, so the scheduled run owns that signal |
