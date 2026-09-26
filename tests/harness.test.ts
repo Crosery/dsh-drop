@@ -18,7 +18,8 @@ import {
 } from '../scripts/harness-lib.mjs'
 import {
   NAME_HEADER, ROUTES,
-  absentInjects, classifyDiagnostics, exportedNames, inert, maskTokens, membersRead, missingMembers, moduleTableOf, noOpenArgs, onTrain, strictModule,
+  absentInjects, classifyDiagnostics, exportedNames, inert, laterHarnessVersions, maskTokens, membersRead, missingMembers, moduleTableOf, noOpenArgs, onTrain,
+  releaseCutoff, strayPackages, strictModule,
 } from '../scripts/smoke-lib.mjs'
 import { BATCH_ROUTE, NAME_HEADER as CONTRACT_NAME_HEADER, RESOLVE_ROUTE, STAGE_ROUTE } from '../src/contract.ts'
 
@@ -292,6 +293,31 @@ test("the shell's module table is read from its bundle", () => {
     'react', 'react/jsx-runtime', 'react-dom', 'react-dom/client', '@deepseek-ai/cordis', '@deepseek-ai/dsh-client-ui-slots',
     '@deepseek-ai/dsh-client-web-react', '@deepseek-ai/dsh-client-ui-primitives', '@deepseek-ai/dsh-client-ui-attachment', '@deepseek-ai/dsh-client-schema-form',
   ])
+})
+
+test('the smoke installs a train as released: cut off at its own release, with no package of a later train', () => {
+  // `npm view @deepseek-ai/dsh time --json`, abridged.
+  const times: Record<string, string> = {
+    created: '2026-08-10T19:41:11.384Z', modified: '2026-09-24T14:18:11.794Z',
+    '0.1.5-rc.2': '2026-09-10T14:57:10.790Z', '0.1.6-alpha.1': '2026-09-15T03:23:13.750Z', '0.1.6-alpha.2': '2026-09-17T13:52:10.201Z',
+    // Publication order is not semver order: 0.1.5-rc.3 went out after 0.1.6-alpha.2.
+    '0.1.5-rc.3': '2026-09-22T05:55:20.869Z', '0.1.7-rc.2': '2026-09-24T14:18:11.337Z',
+  }
+  // One second after its own @deepseek-ai/dsh — not the next harness, whose packages
+  // (dsh-app-boot 0.1.6-alpha.2 at 13:39:43) went out before it and satisfy ^0.1.6-alpha.1.
+  assert.equal(releaseCutoff(times, '0.1.6-alpha.1'), '2026-09-15T03:23:14.750Z')
+  assert.equal(releaseCutoff(times, '0.1.7-rc.2'), undefined, 'the newest version installs as a user gets it today')
+  assert.throws(() => releaseCutoff(times, '0.1.9-rc.1'), /not on npm/)
+  const later = laterHarnessVersions(times, '0.1.6-alpha.1')
+  assert.deepEqual([...later].sort(), ['0.1.5-rc.3', '0.1.6-alpha.2', '0.1.7-rc.2'])
+  assert.deepEqual(laterHarnessVersions(times, '0.1.7-rc.2').size, 0)
+
+  const installed: [string, string][] = [
+    ['@deepseek-ai/dsh', '0.1.6-alpha.1'], ['@deepseek-ai/dsh-app-boot', '0.1.6-alpha.2'], ['@deepseek-ai/dsh-web-frontend', '0.1.6-alpha.1'],
+    ['@deepseek-ai/cordis', '4.0.4'], ['@deepseek-ai/cordis-plugin-hmr', '1.0.19'], ['react', '0.1.6-alpha.2'],
+  ]
+  assert.deepEqual(strayPackages(installed, later), [['@deepseek-ai/dsh-app-boot', '0.1.6-alpha.2']])
+  assert.deepEqual(strayPackages(installed.filter(([name]) => name !== '@deepseek-ai/dsh-app-boot'), later), [])
 })
 
 test('the smoke passes --no-open only where dsh web lists it, and reports an inject target a train lacks', () => {

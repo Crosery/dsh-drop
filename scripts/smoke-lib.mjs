@@ -58,6 +58,47 @@ export function absentInjects(inject, entries) {
   return (inject ?? []).filter((name) => !entries.has(name))
 }
 
+/**
+ * The `--before` that installs a harness train as released, from the `time`
+ * map `npm view @deepseek-ai/dsh time --json` answers: one second after the
+ * train's own `@deepseek-ai/dsh` went out, or `undefined` for the newest
+ * version, which a user installs today.
+ *
+ * Not the next harness's publication: `@deepseek-ai/dsh` lists its packages
+ * with caret ranges (`^0.1.6-alpha.1`), which accept the next prerelease of
+ * the same tuple, and a train's packages go out minutes before its own
+ * `@deepseek-ai/dsh`. A cutoff at the next harness therefore took the next
+ * train's packages — 0.1.6-alpha.1 got 0.1.6-alpha.2's `dsh-app-boot` and
+ * could not start. A package of this train published after the cutoff is
+ * refused by npm and moves it later (`laterCutoff` in smoke-boot.mjs).
+ * @param {Record<string, string>} times
+ * @param {string} version
+ */
+export function releaseCutoff(times, version) {
+  const own = times[version]
+  if (own === undefined) throw new Error(`@deepseek-ai/dsh@${version} is not on npm`)
+  if (laterHarnessVersions(times, version).size === 0) return undefined
+  return new Date(Date.parse(own) + 1000).toISOString()
+}
+
+/** The `@deepseek-ai/dsh` versions published after `version`, from the same `time` map. */
+export function laterHarnessVersions(times, version) {
+  const own = times[version]
+  return new Set(Object.entries(times).filter(([key, at]) => key !== 'created' && key !== 'modified' && at > own).map(([key]) => key))
+}
+
+/**
+ * Installed harness packages (`[name, version]`) at a version of a later
+ * harness train: what a caret range let into a graph meant to be the train as
+ * released. Such a graph is not that train, and a smoke on it proves nothing
+ * about it.
+ * @param {[string, string][]} installed
+ * @param {Set<string>} later - from {@link laterHarnessVersions}.
+ */
+export function strayPackages(installed, later) {
+  return installed.filter(([name, version]) => (name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-')) && later.has(version))
+}
+
 /** A `dsh web` URL carries a one-time session token; nothing this repo prints may. */
 export function maskTokens(text) {
   return String(text).replace(/token=[\w.~%-]+/g, 'token=***')

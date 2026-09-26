@@ -44,13 +44,16 @@
  *                           killed and its stage fails (default 600 s); every
  *                           request to the booted server gets 30 s
  *   [--graph released|today]  with --dsh: resolve the harness's floating
- *                           dependencies as of its release — before the next
- *                           @deepseek-ai/dsh was published (default) — or as
- *                           of today. The cordis family floats under every
+ *                           dependencies as of its release — just after its
+ *                           own @deepseek-ai/dsh went out, with no package of a
+ *                           later train in the tree (default) — or as of
+ *                           today. The cordis family floats under every
  *                           train: a fresh install of 0.1.1-rc.2 today (e.g.
  *                           cordis-plugin-hmr 1.0.19) stops at boot with "user
  *                           patch-layer watching requires the Cordis HMR
- *                           service", plugin or not.
+ *                           service", plugin or not; and the harness's own
+ *                           caret ranges take the next prerelease of the same
+ *                           tuple.
  *   [--keep]
  *   [--accept-risk]         diagnostic only: grant the exact-version exemption
  *                           first, to separate "peer range too narrow" from
@@ -74,7 +77,8 @@ import { parseArgs } from 'node:util'
 import vm from 'node:vm'
 import {
   NAME_HEADER, ROUTES,
-  absentInjects, classifyDiagnostics, inert, installedExports, maskTokens as mask, missingMembers, moduleTableOf, noOpenArgs,
+  absentInjects, classifyDiagnostics, inert, installedExports, laterHarnessVersions, maskTokens as mask, missingMembers, moduleTableOf, noOpenArgs,
+  releaseCutoff, strayPackages,
 } from './smoke-lib.mjs'
 
 const { values } = parseArgs({
@@ -178,20 +182,9 @@ function hasAdmissionCheck(from) {
   return existsSync(main) && /\brequestRejection\s*\(/.test(readFileSync(main, 'utf8'))
 }
 
-/**
- * When the next `@deepseek-ai/dsh` was published after `version` — the moment
- * the train stopped being the newest, and the `--before` that resolves its
- * floating dependencies as a user who installed it then got them. `undefined`
- * for the newest version.
- */
-function supersededAt(version) {
-  const times = JSON.parse(run('npm', ['view', '@deepseek-ai/dsh', 'time', '--json']).stdout)
-  const own = times[version]
-  if (own === undefined) fail('harness', `@deepseek-ai/dsh@${version} is not on npm`)
-  return Object.entries(times)
-    .filter(([key, at]) => key !== 'created' && key !== 'modified' && at > own)
-    .map(([, at]) => at)
-    .sort()[0]
+/** When each `@deepseek-ai/dsh` version was published, as npm records it. */
+function harnessTimes() {
+  return JSON.parse(run('npm', ['view', '@deepseek-ai/dsh', 'time', '--json']).stdout)
 }
 
 /** An empty project to install the harness into. */
@@ -219,52 +212,76 @@ function laterCutoff(output, before) {
 /**
  * Install `spec` into `dir` the way a user gets it, and say how.
  *
- * As released (`--graph released`, the default): `--before` the next harness
- * publication, moved later if the train's own packages went out after it.
- * Install scripts run, as for a user: 0.1.3's session store needs its native
- * addon built. The plain peer graph first; early prereleases carry caret peers
- * that pull a later prerelease of the same tuple, and npm then either answers
- * ERESOLVE or — 0.1.1-rc.2 under npm 11 — takes minutes of CPU to settle.
- * @deepseek-ai/dsh lists every package it composes as a dependency, so legacy
- * peer mode plus the peers it leaves unmet, each at its declared range, is the
- * same harness.
+ * As released (`--graph released`, the default): `--before` one second after
+ * the train's own `@deepseek-ai/dsh` went out ({@link releaseCutoff}), moved
+ * later whenever npm refuses one of the train's own packages as not yet
+ * published then; the installed tree must then hold no package of a later
+ * harness train. Install scripts run, as for a user: 0.1.3's session store
+ * needs its native addon built. The plain peer graph first; early prereleases
+ * carry caret peers, and npm then either answers ERESOLVE or — 0.1.1-rc.2
+ * under npm 11 — takes minutes of CPU to settle. @deepseek-ai/dsh lists every
+ * package it composes as a dependency, so legacy peer mode plus the peers it
+ * leaves unmet, each at its declared range, is the same harness.
  */
 function installHarness(spec, dir) {
   let before
-  if (values.graph === 'released') before = supersededAt(values.dsh)
-  else if (values.graph !== 'today') fail('harness', `--graph must be released or today, not ${values.graph}`)
+  let later = new Set()
+  if (values.graph === 'released') {
+    const times = harnessTimes()
+    if (times[values.dsh] === undefined) fail('harness', `@deepseek-ai/dsh@${values.dsh} is not on npm`)
+    before = releaseCutoff(times, values.dsh)
+    later = laterHarnessVersions(times, values.dsh)
+  } else if (values.graph !== 'today') fail('harness', `--graph must be released or today, not ${values.graph}`)
   const common = () => ['install', '--prefix', dir, '--no-audit', '--no-fund', ...(before === undefined ? [] : ['--before', before])]
   const describe = (how) => `npm install${before === undefined ? '' : ` --before ${before} (as released)`}${how}`
   const limit = Number(values['install-timeout-ms'])
+  /** Run one install; a refusal of the train's own package as unpublished moves the cutoff instead of failing. */
+  const install = (argv, options) => {
+    const r = run('npm', argv, { ...options, allowFailure: true })
+    if (r.status === 0) return { ok: true }
+    const output = `${r.stdout}${r.stderr}`
+    const moved = before === undefined ? undefined : laterCutoff(output, before)
+    if (moved !== undefined) { before = moved; return { ok: false, retry: true } }
+    return { ok: false, retry: false, output, settled: r.error?.code !== 'ETIMEDOUT' && r.signal === null }
+  }
 
   for (let attempt = 0; attempt < 8; attempt += 1) {
     freshProject(dir)
-    const first = run('npm', [...common(), spec], { allowFailure: true, timeout: limit, killSignal: 'SIGKILL' })
-    if (first.status === 0) return describe('')
-    const output = `${first.stdout}${first.stderr}`
-    const later = before === undefined ? undefined : laterCutoff(output, before)
-    if (later !== undefined) { before = later; continue }
-    const settled = first.error?.code !== 'ETIMEDOUT' && first.signal === null
-    if (settled && !/ERESOLVE/.test(output)) fail('harness', `npm install ${spec} failed: ${mask(output.slice(-2000))}`)
-
-    freshProject(dir)
-    run('npm', [...common(), '--legacy-peer-deps', spec])
-    let added = 0
-    for (let round = 0; round < 8; round += 1) {
-      const unmet = unmetPeers(join(dir, 'node_modules'))
-      if (unmet.size === 0) break
-      added += unmet.size
-      run('npm', [...common(), '--legacy-peer-deps', ...[...unmet].map(([name, range]) => `${name}@${range}`)])
+    const first = install([...common(), spec], { timeout: limit, killSignal: 'SIGKILL' })
+    if (first.retry) continue
+    let how = ''
+    if (!first.ok) {
+      if (first.settled && !/ERESOLVE/.test(first.output)) fail('harness', `npm install ${spec} failed: ${mask(first.output.slice(-2000))}`)
+      freshProject(dir)
+      const legacy = install([...common(), '--legacy-peer-deps', spec])
+      if (legacy.retry) continue
+      if (!legacy.ok) fail('harness', `npm install --legacy-peer-deps ${spec} failed: ${mask(legacy.output.slice(-2000))}`)
+      let added = 0
+      let moved = false
+      for (let round = 0; round < 8; round += 1) {
+        const unmet = unmetPeers(join(dir, 'node_modules'))
+        if (unmet.size === 0) break
+        added += unmet.size
+        const more = install([...common(), '--legacy-peer-deps', ...[...unmet].map(([name, range]) => `${name}@${range}`)])
+        if (more.retry) { moved = true; break }
+        if (!more.ok) fail('harness', `adding unmet peers failed: ${mask(more.output.slice(-2000))}`)
+      }
+      if (moved) continue
+      const left = unmetPeers(join(dir, 'node_modules'))
+      if (left.size > 0) fail('harness', `peers still unmet after legacy install: ${[...left.keys()].join(', ')}`)
+      how = ` --legacy-peer-deps + ${added} unmet peers at their ranges (the peer graph ${first.settled ? 'hit ERESOLVE' : `did not settle within ${Math.round(limit / 1000)} s`})`
     }
-    const left = unmetPeers(join(dir, 'node_modules'))
-    if (left.size > 0) fail('harness', `peers still unmet after legacy install: ${[...left.keys()].join(', ')}`)
-    return describe(` --legacy-peer-deps + ${added} unmet peers at their ranges (the peer graph ${settled ? 'hit ERESOLVE' : `did not settle within ${Math.round(limit / 1000)} s`})`)
+    const strays = strayPackages(installedPackages(join(dir, 'node_modules')).map((p) => [p.manifest.name, p.manifest.version]), later)
+    if (strays.length > 0) {
+      fail('harness', `the graph installed with --before ${before} is not ${spec} as released: ${strays.length} package(s) of later harness trains, e.g. ${strays.slice(0, 5).map(([n, v]) => `${n}@${v}`).join(', ')}`)
+    }
+    return describe(how)
   }
   fail('harness', `npm install ${spec} kept refusing its own packages as unpublished before ${before}`)
 }
 
-/** Required peers no installed package can resolve, as `name → first declared range`. */
-function unmetPeers(modules) {
+/** Every package installed under `modules`, nested ones included, with its manifest. */
+function installedPackages(modules) {
   const installed = []
   const walk = (dir) => {
     if (!existsSync(dir)) return
@@ -273,14 +290,18 @@ function unmetPeers(modules) {
       const path = join(dir, entry)
       if (entry.startsWith('@')) { walk(path); continue }
       if (!existsSync(join(path, 'package.json'))) continue
-      installed.push(path)
+      installed.push({ path, manifest: JSON.parse(readFileSync(join(path, 'package.json'), 'utf8')) })
       walk(join(path, 'node_modules'))
     }
   }
   walk(modules)
+  return installed
+}
+
+/** Required peers no installed package can resolve, as `name → first declared range`. */
+function unmetPeers(modules) {
   const unmet = new Map()
-  for (const path of installed) {
-    const manifest = JSON.parse(readFileSync(join(path, 'package.json'), 'utf8'))
+  for (const { path, manifest } of installedPackages(modules)) {
     for (const [name, range] of Object.entries(manifest.peerDependencies ?? {})) {
       if (manifest.peerDependenciesMeta?.[name]?.optional) continue
       // Node resolution: this package's own node_modules, then each ancestor's.
