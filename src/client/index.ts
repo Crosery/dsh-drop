@@ -52,6 +52,7 @@ import { AttachedFiles } from './attached.ts'
 import { installSubmitGuard } from './submit-guard.ts'
 import { PreviewStore } from './preview-store.ts'
 import { acquire, bridgePath, hostPathBridge } from './acquire.ts'
+import { EntryJobs, stageFiles } from './staging-jobs.ts'
 import { acquireFolder, countFolder } from './folder-acquire.ts'
 import type { EntryLike } from '../folder.ts'
 import { RailRegistry, type RailRoute } from './registry.ts'
@@ -93,6 +94,8 @@ export { DROP_NS, en, zh } from './locales.ts'
 export type { DropKey } from './locales.ts'
 export { acquire, bridgePath, hintFor, hostPathBridge } from './acquire.ts'
 export type { Acquired, Acquisition, HostPathBridge } from './acquire.ts'
+export { EntryJobs, linked, stageFiles } from './staging-jobs.ts'
+export type { StageFilesDeps } from './staging-jobs.ts'
 export { acquireFolder, countFolder, HostRefusal } from './folder-acquire.ts'
 export type { FolderOutcome, FolderProgress } from './folder-acquire.ts'
 export { listingOf, sampleOf, walkFolder } from '../folder.ts'
@@ -193,33 +196,6 @@ export function readHints(transfer: DataTransfer): string[] {
 }
 
 /**
- * A signal that aborts when either input does.
- *
- * Written out rather than `AbortSignal.any`, which older Safari lacks.
- * @param a - one signal.
- * @param b - the other.
- * @returns the combined signal.
- */
-function linked(a: AbortSignal, b: AbortSignal): { signal: AbortSignal, release: () => void } {
-  const both = new AbortController()
-  const release = (): void => {
-    a.removeEventListener('abort', forward)
-    b.removeEventListener('abort', forward)
-  }
-  const forward = (event: Event): void => {
-    release()
-    both.abort((event.target as AbortSignal).reason)
-  }
-  if (a.aborted || b.aborted) {
-    both.abort(a.aborted ? a.reason : b.reason)
-    return { signal: both.signal, release }
-  }
-  a.addEventListener('abort', forward)
-  b.addEventListener('abort', forward)
-  return { signal: both.signal, release }
-}
-
-/**
  * Whether an element takes typed text on its own, outside any composer.
  * @param target - an event target.
  * @returns true for inputs, textareas and contenteditable hosts.
@@ -241,16 +217,17 @@ export function apply(ctx: ClientContext): void {
   // URLs outlive the elements that use them.
   const previews = new PreviewStore()
   ctx.effect(() => () => { previews.dispose() }, '@crosery/dsh-drop: preview material')
-  // Folder acquisitions in flight, by entry id: removing the card aborts its
-  // upload, and the Host drops the batch.
-  const folderJobs = new Map<number, AbortController>()
+  // Aborted when the plugin goes: every acquisition in flight stops with it.
+  const aborter = new AbortController()
+  // Acquisitions by entry id, files and folders alike: removing the card
+  // aborts its upload (the Host drops a folder's batch), and the queue moves on.
+  const jobs = new EntryJobs(aborter.signal)
   // Files staged for the next message, held beside the draft the way the
   // composer holds its attachment ids — which is what keeps the text box
   // clean. An entry that leaves (sent or removed) lets its bytes go.
   const attached = new AttachedFiles((entry) => {
     previews.release(entry.key)
-    folderJobs.get(entry.id)?.abort()
-    folderJobs.delete(entry.id)
+    jobs.cancel(entry.id)
   })
   const registry = new RailRegistry<RailHandle>()
   const toast = createToast()
@@ -329,54 +306,20 @@ export function apply(ctx: ClientContext): void {
   })
 
   const overlay = createOverlay()
-  const aborter = new AbortController()
   let depth = 0
 
-  /**
-   * Acquire staged candidates for one session, one at a time.
-   *
-   * Each file shows up in the rail at once as `pending`, so a large upload is
-   * visible and a send cannot leave without it. Sequential rather than
-   * concurrent: a multi-file transfer is usually a few large files, and
-   * letting them race would have them compete for the same disk while making
-   * the mention order nondeterministic.
-   */
-  const stageAll = async (
+  /** Acquire staged candidates for one session, one at a time. */
+  const stageAll = (
     sessionId: string,
     candidates: readonly StagedCandidate<File>[],
     hints: readonly string[],
-  ): Promise<void> => {
-    let failed = 0
-    const queued = candidates.map((candidate) => {
-      // A path already staged in this session is not staged again.
-      if (candidate.path !== undefined && attached.list(sessionId)
-        .some((entry) => entry.status === 'ready' && entry.path === candidate.path)) return undefined
-      const entry = attached.add(sessionId, {
-        kind: 'file', status: 'pending', name: candidate.file.name, size: candidate.file.size,
-      })
-      // Pair the entry with the bytes before it renders, so the first paint
-      // already has a thumbnail to show.
-      previews.put(entry.key, candidate.file)
-      return { candidate, entry }
-    })
-    for (const job of queued) {
-      if (job === undefined) continue
-      if (aborter.signal.aborted) return
-      // Removed while waiting its turn: nothing to acquire for.
-      if (!attached.list(sessionId).some((entry) => entry.id === job.entry.id)) continue
-      try {
-        const one = await acquire(job.candidate.file, job.candidate.path, hints, aborter.signal)
-        if (mentionFor(one.path) === undefined) throw new Error('acquired path cannot be referenced')
-        attached.update(sessionId, job.entry.id, { status: 'ready', path: one.path, how: one.how })
-      } catch (error) {
-        if (aborter.signal.aborted) return
-        console.warn('[dsh-drop] could not acquire a file', error)
-        attached.remove(sessionId, job.entry.id)
-        failed += 1
-      }
-    }
-    if (failed > 0) notify(sessionId, 'error', messages().failed(failed))
-  }
+  ): Promise<void> => stageFiles<File>({
+    attached,
+    jobs,
+    preview: (key, file) => { previews.put(key, file) },
+    acquire,
+    failed: (id, count) => { notify(id, 'error', messages().failed(count)) },
+  }, sessionId, candidates, hints)
 
   /**
    * Acquire dropped folders for one session, one folder at a time.
@@ -396,14 +339,12 @@ export function apply(ctx: ClientContext): void {
     const queued = folders.map((folder) => {
       const name = folder.entry?.name ?? folder.file?.name ?? ''
       const entry = attached.add(sessionId, { kind: 'directory', status: 'pending', name })
-      const job = new AbortController()
-      folderJobs.set(entry.id, job)
-      return { folder, name, entry, job }
+      return { folder, name, entry, waiting: jobs.open(entry.id) }
     })
-    for (const { folder, name, entry, job } of queued) {
-      if (aborter.signal.aborted) return
-      if (job.signal.aborted) continue
-      const { signal, release } = linked(aborter.signal, job.signal)
+    for (const { folder, name, entry, waiting } of queued) {
+      if (jobs.closed) return
+      if (waiting.aborted) continue
+      const { signal, release } = jobs.run(entry.id)
       const root = folder.entry as unknown as EntryLike<File> | undefined
       try {
         if (folder.path !== undefined && mentionFor(folder.path, 'directory') !== undefined) {
@@ -441,7 +382,6 @@ export function apply(ctx: ClientContext): void {
         }
       } finally {
         release()
-        folderJobs.delete(entry.id)
       }
     }
   }
@@ -592,7 +532,7 @@ export function apply(ctx: ClientContext): void {
     window.addEventListener('dragend', reset)
     return () => {
       aborter.abort()
-      folderJobs.clear()
+      jobs.clear()
       document.removeEventListener('dragenter', onDragEnter, true)
       document.removeEventListener('dragover', onDragOver, true)
       document.removeEventListener('dragleave', onDragLeave, true)

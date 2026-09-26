@@ -56,6 +56,8 @@ export { DROP_NS, en, zh } from './locales.ts';
 export type { DropKey } from './locales.ts';
 export { acquire, bridgePath, hintFor, hostPathBridge } from './acquire.ts';
 export type { Acquired, Acquisition, HostPathBridge } from './acquire.ts';
+export { EntryJobs, linked, stageFiles } from './staging-jobs.ts';
+export type { StageFilesDeps } from './staging-jobs.ts';
 export { acquireFolder, countFolder, HostRefusal } from './folder-acquire.ts';
 export type { FolderOutcome, FolderProgress } from './folder-acquire.ts';
 export { listingOf, sampleOf, walkFolder } from '../folder.ts';

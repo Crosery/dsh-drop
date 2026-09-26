@@ -22,7 +22,7 @@ Host 注册 POST /crosery/dsh-drop/resolve（只 stat 比对路径，文件或�
 
 **文件夹。** `planDrop` 以 `folders` 携带每个拖入的文件夹（其 `webkitGetAsEntry()` entry 和 `getAsFile()` 所得 File 的桥接路径，都在处理器内同步读取）。一个文件夹是一条 kind 为 `'directory'` 的 `AttachedFile`，发送时是一条 `mentionFor(path, 'directory')`——带尾部斜杠，含空格时引号闭合——其中的图片绝不进入出厂图片接收口。取得顺序（`client/folder-acquire.ts`）：有桥接路径时立即原地引用，只为卡片计数（默认忽略列表，封顶于默认文件数上限）；否则先向 batch 路由要 `limits`，按上限遍历 entry 树（`folder.ts`：循环 `readEntries` 直到返回空批次，忽略的名称不打开，计数无法读取的条目，碰到第一个上限就停，对全是空目录的树另有访问上限），用前八个文件作证据向 resolve 路由核对 `file://` 提示，否则整个拒绝超限的文件夹，或按每次四个文件上传到批次并提交。期间卡片为 `pending` 并显示已完成文件数，任何条目 pending 时发送拦截器都会拦下发送。移除卡片会中止上传并发送 `abort`；`abort` 没送到时由 Host 的空闲清扫兜底。混合拖入的每一部分各自处理，一个坏文件夹不会连累同批其他条目（上游会拒绝整批）。
 
-状态放在 apply/effect 内；卸载取消上传、移除 document 监听；Web 服务作用域结束时删除所有未完成的文件夹批次。附件离开附件栏（发送或移除）时撤销其 object URL 并释放字节，卸载时撤销其余全部。文本只预览前 64 KiB；Office 和压缩包只提供身份卡。
+状态放在 apply/effect 内；卸载取消上传、移除 document 监听；每个待定条目（文件或文件夹）都在各自的中止信号下运行（`staging-jobs.ts` 中的 `EntryJobs`），移除其卡片即停止上传，由移除导致的失败不会上报；Web 服务作用域结束时删除所有未完成的文件夹批次。附件离开附件栏（发送或移除）时撤销其 object URL 并释放字节，卸载时撤销其余全部。文本只预览前 64 KiB；Office 和压缩包只提供身份卡。
 
 ## 安全与存储
 
